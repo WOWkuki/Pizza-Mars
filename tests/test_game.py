@@ -13,9 +13,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from dungeon import HATCH, DOOR_TILES, OPPOSITE_DIR          # noqa: E402
 from entities import Monster                                 # noqa: E402
-from game import Game                                        # noqa: E402
+from game import (                                           # noqa: E402
+    Game, save_run, load_run, get_save_summary,
+    clear_saved_run, default_profile, record_progress,
+)
 from items import Item                                       # noqa: E402
-from settings import CELL, DOOR_X, DOOR_Y, FINAL_FLOOR       # noqa: E402
+from settings import CELL, DOOR_X, DOOR_Y, FINAL_FLOOR, MAP_ORDER, MAPS  # noqa: E402
 from sprites import SPRITES, PALETTE                         # noqa: E402
 
 
@@ -208,6 +211,39 @@ class TestDungeon(unittest.TestCase):
             self.assertTrue(has_furniture, f"room {room.role} ({room.style}) has no furniture")
             self.assertGreater(len(room.wall_decor), 0)
             self.assertGreater(len(room.floor_decor), 0)
+
+    def test_all_four_maps_generate_and_unlock(self):
+        prof = default_profile()
+        self.assertEqual(prof["unlocked_maps"], ["ares_station"])
+        for map_id in MAP_ORDER:
+            g = Game(seed=10, map_id=map_id)
+            self.assertEqual(g.map_id, map_id)
+            allowed_styles = set(MAPS[map_id]["styles"] + ["storage", MAPS[map_id]["boss_style"]])
+            for rm in g.dungeon.rooms.values():
+                self.assertIn(rm.style, allowed_styles)
+            g.state = "won"
+            record_progress(g, prof, path="/tmp/test_cheese_profile.json")
+        self.assertEqual(set(prof["unlocked_maps"]), set(MAP_ORDER))
+
+    def test_save_and_load_game(self):
+        tmp_save = "/tmp/test_cheese_save.json"
+        clear_saved_run(tmp_save)
+        g = Game(seed=42, map_id="cryo_vaults")
+        g.descend()
+        g.player.hp = 19
+        g.player.weapon = "cutter"
+        g.player.credits = 33
+        self.assertTrue(save_run(g, path=tmp_save))
+        summary = get_save_summary(path=tmp_save)
+        self.assertIn("Polar Cryo-Vaults", summary)
+        loaded = load_run(path=tmp_save)
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.map_id, "cryo_vaults")
+        self.assertEqual(loaded.floor, 2)
+        self.assertEqual(loaded.player.hp, 19)
+        self.assertEqual(loaded.player.weapon, "cutter")
+        self.assertEqual(loaded.player.credits, 33)
+        clear_saved_run(tmp_save)
 
     def test_rolling_pin_on_floor_one(self):
         for seed in range(30):

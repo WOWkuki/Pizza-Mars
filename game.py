@@ -1,15 +1,18 @@
-"""Real-time Isaac-style game rules for Pizza Station Ares.
+"""Real-time Isaac-style game rules, map campaigns, and save/load system.
 
 There is no pygame drawing code in this file. That keeps the rules easy to
 read and lets us test the game automatically (see tests/test_game.py).
 """
 
+import json
 import math
+import os
 import random
 
 from settings import (
-    CELL, ROOM_W, ROOM_H, DOOR_X, DOOR_Y,
+    CELL, DOOR_X, DOOR_Y,
     FINAL_FLOOR, SHOT_SPEED, IFRAME_TIME, PIZZA_HEAL,
+    MAPS, MAP_ORDER,
 )
 from dungeon import Dungeon, HATCH, OPPOSITE_DIR, DOOR_TILES
 from entities import Player, Monster, Projectile, DEATH_TEXT
@@ -31,25 +34,166 @@ FLOOR_NAMES = {
     5: "The Calzone's Lair",
 }
 
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROFILE_PATH = os.path.join(ROOT_DIR, "profile.json")
+SAVEGAME_PATH = os.path.join(ROOT_DIR, "savegame.json")
 
+
+# ---------------------------------------------------------------------------
+# Profile (settings + unlocked maps) and Savegame persistence
+# ---------------------------------------------------------------------------
+def default_profile():
+    return {
+        "resolution_index": 1,         # 1212x624 (Default)
+        "graphics_quality": "High",    # "Low", "Medium", "High"
+        "unlocked_maps": ["ares_station"],
+        "best_scores": {},
+    }
+
+
+def load_profile(path=PROFILE_PATH):
+    prof = default_profile()
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                prof.update(data)
+        except (OSError, ValueError):
+            pass
+    if "ares_station" not in prof["unlocked_maps"]:
+        prof["unlocked_maps"].insert(0, "ares_station")
+    return prof
+
+
+def save_profile(prof, path=PROFILE_PATH):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(prof, f, indent=2)
+    except OSError:
+        pass
+
+
+def record_progress(game, prof=None, path=PROFILE_PATH):
+    """Check if the player unlocked a new map or beat their high score."""
+    if prof is None:
+        prof = load_profile(path)
+    unlocked = prof.setdefault("unlocked_maps", ["ares_station"])
+    newly_unlocked = []
+
+    # Reaching Floor 3 or winning Map 1 unlocks Map 2 (Cryo-Vaults)
+    if (game.floor >= 3 or game.state == "won") and "cryo_vaults" not in unlocked:
+        unlocked.append("cryo_vaults")
+        newly_unlocked.append(MAPS["cryo_vaults"]["name"])
+
+    # Reaching Floor 5 on Cryo-Vaults or beating Cryo-Vaults unlocks Map 3 (Lava Ovens)
+    if (
+        (game.map_id == "cryo_vaults" and (game.state == "won" or game.floor >= 5))
+        or (game.state == "won" and "cryo_vaults" in unlocked and game.map_id != "ares_station")
+    ) and "lava_ovens" not in unlocked:
+        unlocked.append("lava_ovens")
+        newly_unlocked.append(MAPS["lava_ovens"]["name"])
+
+    # Beating Lava Ovens unlocks Map 4 (Anchovy Mothership)
+    if game.map_id == "lava_ovens" and game.state == "won" and "mothership" not in unlocked:
+        unlocked.append("mothership")
+        newly_unlocked.append(MAPS["mothership"]["name"])
+
+    #Also if you win any map, unlock the next map in MAP_ORDER
+    if game.state == "won" and game.map_id in MAP_ORDER:
+        idx = MAP_ORDER.index(game.map_id)
+        if idx + 1 < len(MAP_ORDER):
+            nxt = MAP_ORDER[idx + 1]
+            if nxt not in unlocked:
+                unlocked.append(nxt)
+                newly_unlocked.append(MAPS[nxt]["name"])
+
+    best = prof.setdefault("best_scores", {})
+    if game.score > best.get(game.map_id, 0):
+        best[game.map_id] = game.score
+
+    save_profile(prof, path)
+    return newly_unlocked
+
+
+def save_run(game, path=SAVEGAME_PATH):
+    """Save an active run to disk as JSON."""
+    if game is None or game.state != "playing":
+        return False
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(game.to_dict(), f, indent=2)
+        return True
+    except OSError:
+        return False
+
+
+def clear_saved_run(path=SAVEGAME_PATH):
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def has_saved_run(path=SAVEGAME_PATH):
+    return os.path.exists(path)
+
+
+def get_save_summary(path=SAVEGAME_PATH):
+    """Return a short description of the saved game for the Load button."""
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        map_name = MAPS.get(data.get("map_id", "ares_station"), MAPS["ares_station"])["name"]
+        floor = data.get("floor", 1)
+        p = data.get("player", {})
+        hp = p.get("hp", 25)
+        max_hp = p.get("max_hp", 25)
+        return f"{map_name} - Floor {floor}/{FINAL_FLOOR} (HP {hp}/{max_hp})"
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def load_run(path=SAVEGAME_PATH):
+    """Load and return a saved Game instance, or None if invalid."""
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return Game.from_dict(data)
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Main Game Simulation
+# ---------------------------------------------------------------------------
 class Game:
-    def __init__(self, seed=None):
+    def __init__(self, seed=None, map_id="ares_station"):
         self.seed = seed if seed is not None else random.randrange(1_000_000)
+        self.map_id = map_id if map_id in MAPS else "ares_station"
+        self.map_info = MAPS[self.map_id]
         self.rng = random.Random(self.seed)
+        self.floor_seed = self.seed
         self.messages = []          # list of (text, colour)
         self.state = "playing"      # "playing", "dead" or "won"
         self.floor = 1
         self.time = 0.0             # elapsed seconds played
         self.rooms_cleared = 0
         self.killer = None
+        self.unlocked_notice = []
         self.player = Player(0, 0)
         self.projectiles = []       # active shots in the current room
-        self.particles = []         # small visual hit/sauce splashes: [x, y, vx, vy, col, life]
+        self.particles = []         # small visual hit/sauce splashes
         self.door_cooldown = 0.0
         self.hatch_cooldown = 0.0
         self.current_pos = (0, 0)
         self.new_floor()
-        self.log("Welcome to Pizza Station Ares, chef!", ORANGE)
+        self.log(f"Entered {self.map_info['name']} ({self.map_info['subtitle']})!", ORANGE)
         self.log("Move with WASD, aim with the mouse, and shoot with Left Click!", WHITE)
 
     # ------------------------------------------------------------------ utils
@@ -75,32 +219,152 @@ class Game:
     @property
     def score(self):
         p = self.player
-        return (
+        diff_bonus = self.map_info["difficulty"]
+        base = (
             p.credits
             + p.kills * 10
             + self.rooms_cleared * 15
             + (self.floor - 1) * 50
             + (500 if self.state == "won" else 0)
         )
+        return base + (diff_bonus - 1) * 75
 
     def log(self, text, colour=WHITE):
         self.messages.append((text, colour))
         self.messages = self.messages[-60:]
 
+    # ---------------------------------------------------- save / load helpers
+    def to_dict(self):
+        p = self.player
+        rooms_data = {}
+        for (gx, gy), rm in self.dungeon.rooms.items():
+            key = f"{gx},{gy}"
+            rooms_data[key] = {
+                "visited": rm.visited,
+                "cleared": rm.cleared,
+                "locked": rm.locked,
+                "hatch_spawned": rm.hatch_spawned,
+                "monsters": [
+                    {
+                        "kind": m.kind,
+                        "name": m.name,
+                        "x": m.x,
+                        "y": m.y,
+                        "hp": m.hp,
+                        "max_hp": m.max_hp,
+                        "attack": m.attack,
+                        "defense": m.defense,
+                        "mini_boss": m.mini_boss,
+                        "summoned": m.summoned,
+                    }
+                    for m in rm.monsters
+                ],
+                "items": [
+                    {"key": it.key, "x": it.x, "y": it.y, "amount": it.amount}
+                    for it in rm.items
+                ],
+            }
+        return {
+            "seed": self.seed,
+            "floor_seed": self.floor_seed,
+            "map_id": self.map_id,
+            "floor": self.floor,
+            "time": self.time,
+            "rooms_cleared": self.rooms_cleared,
+            "current_pos": list(self.current_pos),
+            "player": {
+                "x": p.x,
+                "y": p.y,
+                "hp": p.hp,
+                "max_hp": p.max_hp,
+                "weapon": p.weapon,
+                "armor": p.armor,
+                "pizzas": p.pizzas,
+                "credits": p.credits,
+                "kills": p.kills,
+            },
+            "rooms": rooms_data,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        g = cls(seed=data["seed"], map_id=data.get("map_id", "ares_station"))
+        g.floor = data.get("floor", 1)
+        g.floor_seed = data.get("floor_seed", g.seed + g.floor * 100)
+        g.time = data.get("time", 0.0)
+        g.rooms_cleared = data.get("rooms_cleared", 0)
+        g.rng = random.Random(g.floor_seed)
+
+        # Rebuild floor layout deterministically from floor_seed
+        num_rooms = 6 + g.floor
+        g.dungeon = Dungeon(random.Random(g.floor_seed), num_rooms=num_rooms, map_id=g.map_id)
+
+        p_data = data["player"]
+        p = g.player
+        p.x = float(p_data["x"])
+        p.y = float(p_data["y"])
+        p.hp = int(p_data["hp"])
+        p.max_hp = int(p_data["max_hp"])
+        p.weapon = p_data.get("weapon")
+        p.armor = p_data.get("armor")
+        p.pizzas = int(p_data.get("pizzas", 1))
+        p.credits = int(p_data.get("credits", 0))
+        p.kills = int(p_data.get("kills", 0))
+
+        for key, r_state in data.get("rooms", {}).items():
+            gx, gy = map(int, key.split(","))
+            if (gx, gy) not in g.dungeon.rooms:
+                continue
+            rm = g.dungeon.rooms[(gx, gy)]
+            rm.visited = bool(r_state.get("visited", False))
+            rm.cleared = bool(r_state.get("cleared", False))
+            rm.locked = bool(r_state.get("locked", False))
+            if r_state.get("hatch_spawned", False):
+                rm.spawn_hatch()
+            rm.monsters = []
+            for m_info in r_state.get("monsters", []):
+                m = Monster(
+                    m_info["x"], m_info["y"], m_info["kind"],
+                    summoned=m_info.get("summoned", False),
+                    mini_boss=m_info.get("mini_boss", False),
+                )
+                m.name = m_info.get("name", m.name)
+                m.hp = int(m_info["hp"])
+                m.max_hp = int(m_info["max_hp"])
+                m.attack = int(m_info.get("attack", m.attack))
+                m.defense = int(m_info.get("defense", m.defense))
+                rm.monsters.append(m)
+            rm.items = [
+                Item(it["key"], it["x"], it["y"], it.get("amount", 1))
+                for it in r_state.get("items", [])
+            ]
+
+        c_pos = tuple(data.get("current_pos", [0, 0]))
+        g.current_pos = c_pos if c_pos in g.dungeon.rooms else (0, 0)
+        g.messages.clear()
+        g.log(f"Loaded saved game on {g.map_info['name']} (Floor {g.floor})!", CYAN)
+        return g
+
     # ------------------------------------------------------------ floor setup
     def new_floor(self):
+        self.floor_seed = self.rng.randrange(1_000_000_000)
         num_rooms = 6 + self.floor
-        self.dungeon = Dungeon(self.rng, num_rooms=num_rooms)
+        self.dungeon = Dungeon(
+            random.Random(self.floor_seed),
+            num_rooms=num_rooms,
+            map_id=self.map_id,
+        )
         self.projectiles.clear()
         self.particles.clear()
         self.populate_floor()
         self.enter_room((0, 0), from_dir=None)
 
     def pick_monster_type(self):
+        diff = self.map_info["difficulty"]
         weights = {
             "meatball": 6,
-            "drone": 2 + self.floor,
-            "anchovy": max(1, 2 * self.floor - 1),
+            "drone": 2 + self.floor + (2 if self.map_id == "cryo_vaults" else 0),
+            "anchovy": max(1, 2 * self.floor - 1 + (diff - 1)),
         }
         return self.rng.choices(list(weights), weights=list(weights.values()))[0]
 
@@ -119,13 +383,17 @@ class Game:
     def populate_floor(self):
         cx = (DOOR_X + 0.5) * CELL
         cy = (DOOR_Y + 0.5) * CELL
+        diff_bonus = self.floor - 1 + (self.map_info["difficulty"] - 1)
 
         for pos, room in self.dungeon.rooms.items():
             if room.role == "start":
+                # On harder maps, give an extra pizza or oxygen in the starting room
+                if self.floor == 1 and self.map_info["difficulty"] >= 2:
+                    sx, sy = room.random_free_pixel(self.rng, avoid_center=True, margin_tiles=2)
+                    room.items.append(Item("pizza", sx, sy))
                 continue
 
             if room.role == "treasure":
-                # Guaranteed upgrade in the treasure room
                 if self.floor == 1:
                     key = "rolling_pin"
                 elif self.floor == 3:
@@ -137,21 +405,22 @@ class Game:
 
             if room.role == "boss":
                 if self.floor == FINAL_FLOOR:
-                    room.monsters.append(Monster(cx, cy, "calzone"))
+                    boss = Monster(cx, cy, "calzone", diff_bonus)
+                    boss.name = self.map_info["boss_name"]
+                    room.monsters.append(boss)
                 else:
                     kind = "anchovy" if self.floor >= 2 else "drone"
-                    room.monsters.append(Monster(cx, cy, kind, self.floor - 1, mini_boss=True))
-                    # Add a helper meatball on deeper floors
+                    room.monsters.append(Monster(cx, cy, kind, diff_bonus, mini_boss=True))
                     if self.floor >= 3:
                         hx, hy = room.random_free_pixel(self.rng, avoid_center=True, margin_tiles=3)
-                        room.monsters.append(Monster(hx, hy, "meatball", self.floor - 1))
+                        room.monsters.append(Monster(hx, hy, "meatball", diff_bonus))
                 continue
 
             # Normal room: spawn 2..4 monsters away from doors
             count = self.rng.randint(2, min(4, 1 + self.floor))
             for _ in range(count):
                 mx, my = room.random_free_pixel(self.rng, avoid_center=False, margin_tiles=3)
-                room.monsters.append(Monster(mx, my, self.pick_monster_type(), self.floor - 1))
+                room.monsters.append(Monster(mx, my, self.pick_monster_type(), diff_bonus))
 
             if self.rng.random() < 0.55:
                 ix, iy = room.random_free_pixel(self.rng, avoid_center=False, margin_tiles=2)
@@ -168,14 +437,12 @@ class Game:
         self.particles.clear()
         self.door_cooldown = 0.35
 
-        # Spawn player near the doorway they entered from (or room center on start)
         if from_dir is None:
             self.player.x = (DOOR_X + 0.5) * CELL
             self.player.y = (DOOR_Y + 0.5) * CELL
         else:
             entry_door = OPPOSITE_DIR[from_dir]
             dtx, dty = DOOR_TILES[entry_door]
-            # Step 1.3 tiles inside the room from the doorway
             if entry_door == "N":
                 self.player.x = (dtx + 0.5) * CELL
                 self.player.y = (dty + 1.45) * CELL
@@ -192,11 +459,10 @@ class Game:
         if room.monsters:
             room.locked = True
             room.cleared = False
-            # Brief grace period when entering a room with monsters
             self.player.iframe_timer = max(self.player.iframe_timer, 0.45)
             if room.role == "boss":
                 if self.floor == FINAL_FLOOR:
-                    self.log("BOSS ROOM: The Giant Calzone blocks your way!", YELLOW)
+                    self.log(f"BOSS ROOM: {self.map_info['boss_name']} blocks your way!", YELLOW)
                 else:
                     self.log(f"Floor Guardian: Defeat {room.monsters[0].name} to open the hatch!", ORANGE)
             else:
@@ -215,7 +481,6 @@ class Game:
         self.time += dt
         p = self.player
 
-        # Timers
         if p.fire_timer > 0:
             p.fire_timer = max(0.0, p.fire_timer - dt)
         if p.iframe_timer > 0:
@@ -248,18 +513,15 @@ class Game:
         else:
             p.moving = False
 
-        # Shoot toward mouse target when LMB is held/clicked
         if shooting and p.fire_timer <= 0.0:
             self.player_shoot(aim_target)
 
-        # Pickups, doors, and floor hatch
         self.pickup_items()
         if self.check_doors():
             return
         if self.check_hatch():
             return
 
-        # Update projectiles, monsters, particles, and room lock state
         self.update_projectiles(dt)
         self.update_monsters(dt)
         self.update_particles(dt)
@@ -377,7 +639,6 @@ class Game:
                 self.log(f"Sold spare {item.name} for 5 credits.", YELLOW)
 
     def check_doors(self):
-        """Transition into the neighboring room if the player walks into an open door."""
         if self.door_cooldown > 0.0 or self.room.locked:
             return False
         d = self.room.door_at_pixel(self.player.x, self.player.y)
@@ -388,7 +649,6 @@ class Game:
         return False
 
     def check_hatch(self):
-        """Descend to the next floor if the player steps onto the open delivery hatch."""
         if self.hatch_cooldown > 0.0 or self.room.locked:
             return False
         tx = int(self.player.x // CELL)
@@ -465,7 +725,6 @@ class Game:
         m.hp -= damage
         m.hit_flash = 0.12
         self.spawn_splash(m.x, m.y, (215, 55, 45), count=6)
-        # Gentle knockback
         k_len = math.hypot(knock_vx, knock_vy)
         if k_len > 0 and m.kind != "calzone":
             self.move_entity(m, (knock_vx / k_len) * 8.0, (knock_vy / k_len) * 8.0)
@@ -479,7 +738,7 @@ class Game:
         damage = max(1, raw_damage - p.defense)
         p.hp -= damage
         p.iframe_timer = IFRAME_TIME
-        p.hit_flash = 0.2
+        p.hit_flash = 0.25
         self.spawn_splash(p.x, p.y, (235, 80, 70), count=8)
         self.log(f"The {attacker_name} hits you for {damage}!", RED)
         if p.hp <= 0:
@@ -502,7 +761,7 @@ class Game:
             self.state = "won"
             self.room.locked = False
             self.room.cleared = True
-            self.log("You defeated the Giant Calzone and saved Pizza Station Ares!", YELLOW)
+            self.log(f"You defeated {m.name} and saved {self.map_info['name']}!", YELLOW)
 
     def check_room_clear(self):
         room = self.room
@@ -510,15 +769,13 @@ class Game:
             room.locked = False
             room.cleared = True
             self.rooms_cleared += 1
-            # Catch breath (+1 HP on room clear)
             if self.player.hp < self.player.max_hp:
                 self.player.hp += 1
             self.log("Room cleared! The doors unlock.", GREEN)
-            # Chance to spawn a slice of pizza as a room-clear reward
             if self.rng.random() < 0.35:
                 rx = (DOOR_X + 0.5) * CELL
                 ry = (DOOR_Y + 0.5) * CELL
-                if not room. circle_collides(rx, ry, 12.0):
+                if not room.circle_collides(rx, ry, 12.0):
                     room.items.append(Item("pizza", rx, ry))
             if room.role == "boss" and self.floor < FINAL_FLOOR and not room.hatch_spawned:
                 room.spawn_hatch()
@@ -542,7 +799,6 @@ class Game:
             ux, uy = dx / dist, dy / dist
 
             if m.ai == "wander_chase":
-                # Meatballs wobble and chase the player
                 wobble = math.sin(m.timer * 3.5 + m.x * 0.05) * 0.65
                 ang = math.atan2(dy, dx) + wobble
                 vx = math.cos(ang) * m.speed
@@ -550,7 +806,6 @@ class Game:
                 self.move_entity(m, vx * dt, vy * dt)
 
             elif m.ai == "shooter":
-                # Drones keep medium distance, bob/weave, and pause briefly to shoot
                 if m.shot_timer < 0.35:
                     vx, vy = 0.0, 0.0
                 elif dist < 140.0:
@@ -566,13 +821,11 @@ class Game:
                     m.shot_timer = 1.55 if m.mini_boss else 1.95
 
             elif m.ai == "lunge":
-                # Anchovies stalk the player and periodically dash fast
                 cycle = m.timer % 2.4
                 mult = 1.65 if cycle > 1.85 else 0.88
                 self.move_entity(m, ux * m.speed * mult * dt, uy * m.speed * mult * dt)
 
             elif m.ai == "boss":
-                # Giant Calzone: stalks, fires 3-way molten cheese spreads, spawns meatballs
                 self.move_entity(m, ux * m.speed * dt, uy * m.speed * dt)
                 if m.shot_timer <= 0.0:
                     base_ang = math.atan2(dy, dx)
@@ -583,7 +836,6 @@ class Game:
                             speed=250.0, kind="cheese", radius=8.0
                         )
                     m.shot_timer = 1.75
-                # Summon a meatball every ~6.5 seconds if fewer than 2 summoned exist
                 if m.timer >= 6.5:
                     m.timer = 0.0
                     minions = sum(1 for o in self.room.monsters if o.summoned)
@@ -593,13 +845,12 @@ class Game:
                             self.room.monsters.append(
                                 Monster(sx, sy, "meatball", self.floor - 1, summoned=True)
                             )
-                            self.log("The Giant Calzone spits out a Mutant Meatball!", ORANGE)
+                            self.log(f"{m.name} spits out a Mutant Meatball!", ORANGE)
 
-            # Contact damage when touching the chef
             if math.hypot(p.x - m.x, p.y - m.y) <= p.radius + m.radius - 2.0:
                 self.damage_player(m.attack, m.name)
 
-        # Gently push overlapping monsters apart so they don't stack
+        # Gently push overlapping monsters apart
         for i in range(len(monsters)):
             for j in range(i + 1, len(monsters)):
                 a, b = monsters[i], monsters[j]

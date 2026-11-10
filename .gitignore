@@ -1,3 +1,5 @@
 .venv/
 __pycache__/
 *.pyc
+profile.json
+savegame.json

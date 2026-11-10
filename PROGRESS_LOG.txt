@@ -131,3 +131,32 @@ IDEAS FOR NEXT STEPS (not done yet)
       Mars windows, held blaster) and kitchen boss room (wall ovens, held cutter launcher, spinning blades).
     * Check 3 (Real window loop): Simulated 150 frames of movement, mouse aiming, and shooting -> OK.
 - Committed changes to Git.
+
+[2026-11-10 15:12-15:22] Session 4 - STARTER MENU, SETTINGS, SAVE/LOAD & 4 UNLOCKABLE MAPS
+- Checked PROGRESS_LOG.txt first as required.
+- User requested:
+    1. More maps to choose from and unlock.
+    2. A starter menu with Settings (changing resolution and graphics quality).
+    3. A Play button that lets the player choose between Load Saved Game and Start New Game.
+- Changes made:
+    * settings.py: Added 4 campaigns in MAPS / MAP_ORDER:
+        1. Pizza Station Ares (Unlocked at start, Boss: Giant Calzone)
+        2. Polar Cryo-Vaults (Unlock: Reach Floor 3 or beat Map 1, Boss: Frostbite Calzone)
+        3. Olympus Lava Ovens (Unlock: Beat Polar Cryo-Vaults, Boss: Volcanic Calzone)
+        4. Anchovy Mothership (Unlock: Beat Olympus Lava Ovens, Boss: Emperor Calzone Rex)
+      Added RESOLUTIONS (1010x520, 1212x624, 1454x748, 1696x874) and GRAPHICS_LEVELS (Low, Medium, High).
+    * dungeon.py: Generates floor rooms and boss arenas using the selected map's style palette.
+    * game.py: Added JSON save/load system (save_run, load_run, get_save_summary, clear_saved_run)
+      and profile persistence (load_profile, save_profile, record_progress) for unlocked maps,
+      high scores, resolution, and graphics quality.
+    * main.py: Built interactive Starter Menu (Play, Settings, Quit), Play Menu (Load Saved Game vs
+      Start New Game), Map Select screen (4 map cards + Unlock All demo button), and Settings screen
+      (Resolution scaling & Graphics Quality toggles), operable with mouse clicks or keyboard.
+      Added F5 quick-save, M to save & return to menu, and automatic room/floor saving.
+    * tests/test_game.py & README.md: Added tests for all 4 maps, unlocking, and save/load (15/15 pass).
+- MULTIPLE CHECKS BEFORE FINISHING:
+    * Check 1 (Unit & Bot tests): 15/15 tests pass, including save/load, map unlock, and 60 full games.
+    * Check 2 (Visual screenshots): Rendered and inspected Starter Menu, Play Menu, Map Select,
+      Settings Menu, and Polar Cryo-Vaults boss room.
+    * Check 3 (Real window loop): Simulated menu navigation, starting a map, shooting, F5 save, and quit -> OK.
+- Committed changes to Git.

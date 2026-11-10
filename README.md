@@ -21,12 +21,26 @@ python3 -m venv .venv
 
 | Input | Action |
 |---|---|
-| **WASD** / Arrow Keys | Move smoothly in 8 directions |
-| **Mouse Cursor** | Aim your shots |
+| **WASD** / Arrow Keys | Move smoothly in 8 directions (or navigate menus) |
+| **Mouse Cursor** | Aim your shots / click menu buttons |
 | **Left Mouse Button (LMB)** | Shoot (hold or click to fire toward cursor) |
 | **H / E / Right Mouse Button** | Eat a pizza slice (+8 HP) |
+| **F5** | Quick-save your current run |
+| **M** | Save run & return to Starter Menu |
 | **R / Enter** | Restart after a run ends |
-| **ESC** | Quit |
+| **ESC** | Save & Quit |
+
+## Starter Menu, Save/Load & 4 Unlockable Maps
+
+- **Starter Menu**: Choose **Play**, **Settings**, or **Quit** with the mouse or keyboard.
+- **Play Menu**: Choose **Load Saved Game** (continues your auto-saved or F5-saved run) or **Start New Game**.
+- **Settings Menu**: Change the **Window Resolution** (`1010x520`, `1212x624`, `1454x748`, `1696x874`) and **Graphics Quality** (`Low`, `Medium`, `High`).
+- **4 Unlockable Maps**:
+  1. **Pizza Station Ares** (Unlocked at start) - Boss: *Giant Calzone*
+  2. **Polar Cryo-Vaults** (Unlock: Reach Floor 3 or beat Map 1) - Boss: *Frostbite Calzone*
+  3. **Olympus Lava Ovens** (Unlock: Beat Polar Cryo-Vaults) - Boss: *Volcanic Calzone*
+  4. **Anchovy Mothership** (Unlock: Beat Olympus Lava Ovens) - Boss: *Emperor Calzone Rex*
+  *(Tip: On the Map Select screen, you can also click **Unlock All Maps (Demo)** to test any map right away!)*
 
 ## How the game works
 
