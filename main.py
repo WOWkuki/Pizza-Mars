@@ -181,8 +181,11 @@ class App:
 
         names = ["chef", "pizza", "meatball", "drone", "anchovy", "calzone"]
         start = SCREEN_W // 2 - len(names) * 74 // 2
+        step_on = (self.frame // 16) % 2 == 1
         for i, name in enumerate(names):
-            big = pygame.transform.scale(self.sprites[name], (64, 64))
+            alt_key = "chef_walk" if name == "chef" else f"{name}_step"
+            key = alt_key if step_on and alt_key in self.sprites else name
+            big = pygame.transform.scale(self.sprites[key], (64, 64))
             self.screen.blit(big, (start + i * 74, 265))
 
         story = [
@@ -204,8 +207,9 @@ class App:
         g = self.game
         room = g.room
         self.screen.fill(SPACE, (0, 0, VIEW_W, VIEW_H))
+        anim_alt = (self.frame // 14) % 2 == 1
 
-        # 1. Draw floor, walls, obstacles, doors, and hatch
+        # 1. Draw floor, walls, doors, and furniture obstacles
         floor_variants = self.floors[room.style]
         for ty in range(ROOM_H):
             for tx in range(ROOM_W):
@@ -216,7 +220,6 @@ class App:
                     img = self.walls["front" if below_is_floor else "top"]
                     self.screen.blit(img, (sx, sy))
                 elif tile == DOOR:
-                    # Check if this door leads to the boss room
                     door_dir = None
                     for d, (dx, dy) in DOOR_TILES.items():
                         if (tx, ty) == (dx, dy):
@@ -237,19 +240,45 @@ class App:
                     # Floor base
                     f_img = floor_variants[(tx * 7 + ty * 13) % 3]
                     self.screen.blit(f_img, (sx, sy))
-                    if tile == OBSTACLE:
-                        self.screen.blit(self.walls["obstacle"], (sx, sy))
-                    elif tile == HATCH:
-                        self.screen.blit(self.sprites["hatch"], (sx, sy))
 
-        # 2. Draw items on the floor (with a subtle bobbing animation)
-        bob_item = int(math.sin(self.frame * 0.1) * 3)
+        # 1b. Draw walkable floor decorations (rugs, diner stools, grates, pizza boxes)
+        for tx, ty, d_kind in room.floor_decor:
+            if d_kind in self.walls:
+                self.screen.blit(self.walls[d_kind], (tx * CELL, ty * CELL))
+
+        # 1c. Draw wall fixtures (Mars windows, brick ovens, neon signs, kitchen racks)
+        for tx, ty, w_kind in room.wall_decor:
+            key = f"{w_kind}_alt" if anim_alt and f"{w_kind}_alt" in self.walls else w_kind
+            if key in self.walls:
+                self.screen.blit(self.walls[key], (tx * CELL, ty * CELL))
+                if w_kind == "wall_oven":
+                    # Warm flickering firelight on the floor in front of wall ovens
+                    glow_r = 26 + (self.frame % 6)
+                    glow = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
+                    pygame.draw.circle(glow, (245, 130, 40, 45), (glow_r, glow_r), glow_r)
+                    self.screen.blit(glow, (tx * CELL + CELL // 2 - glow_r, (ty + 1) * CELL - 8))
+
+        # 1d. Draw solid furniture (big dining tables, kitchen counters, ovens, freezers, crates)
+        for ty in range(ROOM_H):
+            for tx in range(ROOM_W):
+                tile = room.tiles[ty][tx]
+                sx, sy = tx * CELL, ty * CELL
+                if tile == OBSTACLE:
+                    f_key = room.furniture[ty][tx] or "obstacle"
+                    if f_key == "oven_block" and anim_alt:
+                        f_key = "oven_block_alt"
+                    self.screen.blit(self.walls.get(f_key, self.walls["obstacle"]), (sx, sy))
+                elif tile == HATCH:
+                    self.screen.blit(self.sprites["hatch"], (sx, sy))
+
+        # 2. Draw items on the floor (with bobbing animation & pulsing pedestal ring)
+        bob_item = int(math.sin(self.frame * 0.12) * 3)
         for item in room.items:
             if item.key in ("rolling_pin", "cutter", "apron", "oxygen"):
-                # Pedestal glow under upgrade items
+                ring_r = 17 + int(math.sin(self.frame * 0.15) * 2)
                 pygame.draw.circle(
                     self.screen, (250, 212, 80),
-                    (int(item.x), int(item.y) + 8), 18, 2
+                    (int(item.x), int(item.y) + 8), ring_r, 2
                 )
             spr = self.sprites[item.sprite]
             self.screen.blit(
@@ -261,11 +290,30 @@ class App:
         for pt in g.particles:
             pygame.draw.circle(self.screen, pt[4], (int(pt[0]), int(pt[1])), 3)
 
-        # 4. Draw monsters
+        # 4. Draw monsters with frame-by-frame animations
         for m in room.monsters:
-            spr_key = "calzone_boss" if m.kind == "calzone" else m.sprite
+            step_on = int(m.timer * 6.0) % 2 == 1
+            if m.kind == "calzone":
+                spr_key = "calzone_boss_step" if step_on else "calzone_boss"
+            else:
+                spr_key = f"{m.sprite}_step" if step_on and f"{m.sprite}_step" in self.sprites else m.sprite
             spr = self.sprites[spr_key]
-            bob = 3 if m.kind == "drone" and (self.frame // 10) % 2 else 0
+            # Flip anchovy horizontally when moving right so it faces its target
+            if m.kind == "anchovy" and g.player.x > m.x:
+                spr = pygame.transform.flip(spr, True, False)
+
+            if m.kind == "drone":
+                bob = int(math.sin(self.frame * 0.22 + m.x) * 4)
+            elif m.kind == "meatball":
+                bob = abs(int(math.sin(m.timer * 7.0) * 5))
+            else:
+                bob = 2 if step_on else 0
+
+            # Soft shadow under monster
+            pygame.draw.ellipse(
+                self.screen, (16, 8, 20),
+                (int(m.x) - int(m.radius * 0.8), int(m.y) + int(m.radius * 0.55), int(m.radius * 1.6), 8),
+            )
             draw_x = int(m.x) - spr.get_width() // 2
             draw_y = int(m.y) - spr.get_height() // 2 - bob
             if m.mini_boss and m.kind != "calzone":
@@ -277,21 +325,47 @@ class App:
                 bw = max(36, spr.get_width() - 8)
                 self.bar(int(m.x) - bw // 2, draw_y - 7, bw, 5, m.hp, m.max_hp, RED)
 
-        # 5. Draw chef (flashes briefly during invincibility frames)
+        # 5. Draw chef with walking animation + held weapon aimed at mouse cursor
         p = g.player
-        show_chef = p.iframe_timer <= 0.0 or (self.frame // 3) % 2 == 0
+        pygame.draw.ellipse(
+            self.screen, (16, 8, 20),
+            (int(p.x) - 12, int(p.y) + 12, 24, 8),
+        )
+        show_chef = p.hit_flash <= 0.0 or (self.frame // 2) % 2 == 0
         if show_chef:
-            spr = self.sprites["chef"]
+            walk_step = p.moving and (int(p.walk_timer * 10.0) % 2 == 1)
+            chef_key = "chef_walk" if walk_step else "chef"
+            spr = self.sprites[chef_key]
+            facing_left = math.cos(p.aim_angle) < 0
+            if facing_left:
+                spr = pygame.transform.flip(spr, True, False)
+            hop = 2 if walk_step else int(math.sin(self.frame * 0.08) * 1)
             self.screen.blit(
                 spr,
-                (int(p.x) - spr.get_width() // 2, int(p.y) - spr.get_height() // 2),
+                (int(p.x) - spr.get_width() // 2, int(p.y) - spr.get_height() // 2 - hop),
             )
-        # Small directional aim dot around the chef showing aim angle
-        aim_x = int(p.x + math.cos(p.aim_angle) * 24)
-        aim_y = int(p.y + math.sin(p.aim_angle) * 24)
-        pygame.draw.circle(self.screen, YELLOW, (aim_x, aim_y), 3)
 
-        # 6. Draw projectiles
+            # 5b. Draw the chef's held weapon rotated toward the mouse cursor + recoil & muzzle flash
+            w_base = self.sprites[p.held_weapon_sprite]
+            deg = -math.degrees(p.aim_angle)
+            if facing_left:
+                w_img = pygame.transform.flip(w_base, False, True)
+            else:
+                w_img = w_base
+            w_rot = pygame.transform.rotate(w_img, deg)
+            recoil = (p.recoil_timer / 0.12) * 6.0 if p.recoil_timer > 0 else 0.0
+            hold_dist = 15.0 - recoil
+            wx = p.x + math.cos(p.aim_angle) * hold_dist
+            wy = p.y + 3.0 + math.sin(p.aim_angle) * hold_dist
+            self.screen.blit(w_rot, (int(wx) - w_rot.get_width() // 2, int(wy) - w_rot.get_height() // 2))
+
+        if p.muzzle_timer > 0:
+            mx_tip = int(p.x + math.cos(p.aim_angle) * 27.0)
+            my_tip = int(p.y + 3.0 + math.sin(p.aim_angle) * 27.0)
+            pygame.draw.circle(self.screen, (255, 160, 50), (mx_tip, my_tip), 7)
+            pygame.draw.circle(self.screen, (255, 245, 160), (mx_tip, my_tip), 4)
+
+        # 6. Draw projectiles with spinning/flickering animations
         for proj in g.projectiles:
             px, py = int(proj.x), int(proj.y)
             r = int(proj.radius)
@@ -299,6 +373,12 @@ class App:
                 if proj.kind == "cutter":
                     pygame.draw.circle(self.screen, (220, 225, 238), (px, py), r)
                     pygame.draw.circle(self.screen, (90, 95, 115), (px, py), r, 2)
+                    # Spinning blade spokes
+                    spin = proj.age * 22.0
+                    for k_ang in (0.0, math.pi * 0.5, math.pi, math.pi * 1.5):
+                        bx = px + int(math.cos(spin + k_ang) * (r + 2))
+                        by = py + int(math.sin(spin + k_ang) * (r + 2))
+                        pygame.draw.line(self.screen, (240, 245, 255), (px, py), (bx, by), 2)
                     pygame.draw.circle(self.screen, RED, (px, py), 3)
                 elif proj.kind == "spice":
                     pygame.draw.circle(self.screen, (250, 145, 50), (px, py), r)
@@ -308,7 +388,8 @@ class App:
                     pygame.draw.circle(self.screen, (205, 65, 45), (px, py), max(2, r - 3))
             else:
                 if proj.kind == "cheese":
-                    pygame.draw.circle(self.screen, (240, 130, 35), (px, py), r)
+                    pulse = 1 if (self.frame // 4) % 2 == 0 else -1
+                    pygame.draw.circle(self.screen, (240, 130, 35), (px, py), r + pulse)
                     pygame.draw.circle(self.screen, (255, 220, 90), (px, py), max(3, r - 2))
                 else:
                     pygame.draw.circle(self.screen, (255, 55, 55), (px, py), r)

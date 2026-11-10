@@ -222,6 +222,10 @@ class Game:
             p.iframe_timer = max(0.0, p.iframe_timer - dt)
         if p.hit_flash > 0:
             p.hit_flash = max(0.0, p.hit_flash - dt)
+        if p.recoil_timer > 0:
+            p.recoil_timer = max(0.0, p.recoil_timer - dt)
+        if p.muzzle_timer > 0:
+            p.muzzle_timer = max(0.0, p.muzzle_timer - dt)
         if self.door_cooldown > 0:
             self.door_cooldown = max(0.0, self.door_cooldown - dt)
         if self.hatch_cooldown > 0:
@@ -233,12 +237,16 @@ class Game:
             if ax != p.x or ay != p.y:
                 p.aim_angle = math.atan2(ay - p.y, ax - p.x)
 
-        # Move player smoothly with wall sliding
+        # Move player smoothly with wall sliding & walking animation
         if move_dx != 0.0 or move_dy != 0.0:
+            p.moving = True
+            p.walk_timer += dt
             length = math.hypot(move_dx, move_dy)
             vx = (move_dx / length) * p.speed
             vy = (move_dy / length) * p.speed
             self.move_entity(p, vx * dt, vy * dt, is_player=True)
+        else:
+            p.moving = False
 
         # Shoot toward mouse target when LMB is held/clicked
         if shooting and p.fire_timer <= 0.0:
@@ -302,9 +310,9 @@ class Game:
         angle = p.aim_angle
         vx = math.cos(angle) * SHOT_SPEED
         vy = math.sin(angle) * SHOT_SPEED
-        sx = p.x + math.cos(angle) * 16.0
-        sy = p.y + math.sin(angle) * 16.0
-        radius = 8.0 if p.shot_kind == "cutter" else 6.0
+        sx = p.x + math.cos(angle) * 22.0
+        sy = p.y + math.sin(angle) * 22.0
+        radius = 8.0 if p.shot_kind == "cutter" else 7.0
         proj = Projectile(
             sx, sy, vx, vy,
             damage=p.attack,
@@ -315,6 +323,8 @@ class Game:
         )
         self.projectiles.append(proj)
         p.fire_timer = p.fire_cooldown
+        p.recoil_timer = 0.12
+        p.muzzle_timer = 0.08
         return True
 
     def eat_pizza(self):

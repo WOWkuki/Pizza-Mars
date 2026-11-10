@@ -85,6 +85,18 @@ class Player(Entity):
         self.fire_timer = 0.0
         self.iframe_timer = 0.0   # brief invincibility after taking a hit
         self.aim_angle = 0.0
+        self.moving = False
+        self.walk_timer = 0.0
+        self.recoil_timer = 0.0   # weapon kickback animation timer
+        self.muzzle_timer = 0.0   # muzzle flash animation timer
+
+    @property
+    def held_weapon_sprite(self):
+        if self.weapon == "cutter":
+            return "weapon_cutter"
+        if self.weapon == "rolling_pin":
+            return "weapon_rolling_pin"
+        return "weapon_blaster"
 
     @property
     def attack(self):

@@ -197,6 +197,18 @@ class TestDungeon(unittest.TestCase):
                     tx, ty = int(i.x // CELL), int(i.y // CELL)
                     self.assertTrue(room.is_walkable(tx, ty))
 
+    def test_rooms_have_furniture_and_decorations(self):
+        g = Game(7)
+        for room in g.dungeon.rooms.values():
+            has_furniture = any(
+                room.furniture[y][x] is not None
+                for y in range(len(room.furniture))
+                for x in range(len(room.furniture[0]))
+            )
+            self.assertTrue(has_furniture, f"room {room.role} ({room.style}) has no furniture")
+            self.assertGreater(len(room.wall_decor), 0)
+            self.assertGreater(len(room.floor_decor), 0)
+
     def test_rolling_pin_on_floor_one(self):
         for seed in range(30):
             g = Game(seed)
@@ -269,6 +281,18 @@ class TestRules(unittest.TestCase):
         self.assertEqual(self.p.max_hp, start_max + 5)
         self.assertEqual(self.p.pizzas, 2)
         self.assertGreaterEqual(self.p.credits, 7)
+
+    def test_chef_held_weapon_and_animations(self):
+        self.assertEqual(self.p.held_weapon_sprite, "weapon_blaster")
+        self.g.update(0.05, 1.0, 0.0, aim_target=(self.p.x + 100.0, self.p.y), shooting=True)
+        self.assertTrue(self.p.moving)
+        self.assertGreater(self.p.walk_timer, 0.0)
+        self.assertGreater(self.p.recoil_timer, 0.0)
+        self.assertGreater(self.p.muzzle_timer, 0.0)
+        self.p.weapon = "rolling_pin"
+        self.assertEqual(self.p.held_weapon_sprite, "weapon_rolling_pin")
+        self.p.weapon = "cutter"
+        self.assertEqual(self.p.held_weapon_sprite, "weapon_cutter")
 
     def test_dying_and_winning(self):
         boss = Monster(self.p.x, self.p.y, "calzone")

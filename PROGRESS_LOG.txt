@@ -104,3 +104,30 @@ IDEAS FOR NEXT STEPS (not done yet)
     * Check 2 (Visual screenshots): Rendered and inspected title, combat room, boss fight, game over, and win screens.
     * Check 3 (Real window loop + input simulation): Ran 150 frames of mouse aiming, LMB shooting, movement, and quitting -> OK.
 - Committed changes to Git.
+
+[2026-11-10 14:45-15:04] Session 3 - ROOM FURNITURE, HELD WEAPONS & ANIMATIONS
+- Checked PROGRESS_LOG.txt first as required.
+- User requested:
+    1. Add themed furniture/props to rooms so they aren't plain (big tables, kitchen counters, ovens, etc.).
+    2. Give the chef a visible weapon in hand.
+    3. Add animations across the game.
+- Changes made:
+    * dungeon.py: Every room now generates themed 2-tile and 1-tile furniture layouts (big dining tables,
+      stainless-steel kitchen prep counters, brick pizza ovens, cryo-freezers, Mars cargo crates, and
+      hydroponic tomato planters) plus wall fixtures (Mars windows, wall ovens, neon pizza signs,
+      hanging kitchen racks, vents) and walkable floor details (diner stools around tables, rugs,
+      grates, pizza boxes, sauce/flour spots).
+    * sprites.py: Added 2-frame animation sprites for the chef and all monsters (chef_walk,
+      meatball_step, drone_step, anchovy_step, calzone_step), 3 held weapon sprites (Sauce/Dough
+      Blaster, Rolling Pin Cannon, Rotary Pizza Cutter Launcher), and all furniture/wall/floor art.
+    * entities.py & game.py: Added walking timer, weapon recoil kickback, and muzzle flash timers.
+    * main.py: Draws the chef's held weapon rotated toward the mouse cursor with kickback recoil and
+      muzzle flash on firing, walking & monster animations, flickering oven firelight, twinkling
+      Mars windows, pulsing neon signs, and spinning cutter blade projectiles.
+    * tests/test_game.py: Added tests for room furniture/decorations and chef held weapons/animations.
+- MULTIPLE CHECKS BEFORE FINISHING:
+    * Check 1 (Unit & Bot tests): 13/13 tests pass, including 60/60 full real-time bot playthroughs.
+    * Check 2 (Visual screenshots): Rendered and inspected dining room (big tables, stools, neon signs,
+      Mars windows, held blaster) and kitchen boss room (wall ovens, held cutter launcher, spinning blades).
+    * Check 3 (Real window loop): Simulated 150 frames of movement, mouse aiming, and shooting -> OK.
+- Committed changes to Git.
