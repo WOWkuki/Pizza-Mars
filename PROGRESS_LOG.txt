@@ -1,0 +1,80 @@
+PROJECT CHEESE - PROGRESS LOG
+=============================
+(The AI assistant reads this file at the start of every prompt and appends to it after every change.)
+
+[2026-11-10 11:28] Session 1
+- Checked workspace: folder is empty, no code yet.
+- Checked tools on the PC: Python 3 and Node.js are installed. Pygame and Godot are NOT installed.
+- Created this log file.
+- Recommended tech stack (see below). Waiting for the user to describe the game idea.
+
+RECOMMENDED TECH STACK
+- Language: Python 3 (easy to read, great for school projects, already installed)
+- Graphics/game library: Pygame-CE (simple 2D, install: pip install pygame-ce)
+- Art: Pixel art made in Piskel (free, browser) or LibreSprite; 32x32 sprites
+- Sound: sfxr/jsfxr for sound effects, free music from OpenGameArt.org
+- Version control: Git (save history, shows teacher your progress)
+- Alternative if a bigger/3D game is wanted: Godot 4 with GDScript
+
+TESTING CHECKLIST (run before every "finished")
+- Game launches without errors
+- Controls respond
+- Win/lose conditions work
+- No crash on quit
+
+[2026-11-10 11:33] Session 1 (cont.)
+- User chose genre: ROGUELIKE. Theme not specified yet (message was cut off). Asked user for theme.
+
+[2026-11-10 11:45] Session 1 (cont.)
+- THEME: Pizzeria on Mars. 2D, pixel art, roguelike.
+- Created .venv (Python virtual environment) in project folder. pygame-ce install needs internet; user asked for an explanation of the plan first. Explained plan, waiting for approval.
+
+[2026-11-10 11:48-12:00] Session 1 - FIRST PLAYABLE VERSION BUILT
+- Installed pygame-ce 2.5.8 into .venv (user approved).
+- Game name: "Pizza Station Ares". Python 3 + Pygame-CE, turn-based, top-down grid, 2D pixel art.
+- Files created:
+    settings.py   - tweakable numbers (window, HP, FOV, regen...)
+    dungeon.py    - random rooms + Mars-dust tunnels, field of view (Bresenham rays)
+    entities.py   - Player (chef) and 4 monster types: Mutant Meatball, Rogue Delivery Drone,
+                    Alien Anchovy, Giant Calzone (boss, spits out meatballs)
+    items.py      - Pizza Slice, Oxygen Tank, Rolling Pin, Pizza Cutter, Heat-Shield Apron, Mars Credits
+    game.py       - all rules: turns, combat, pickups, monster AI (BFS pathfinding), win/lose, score
+    sprites.py    - 16x16 pixel art as letter grids + code-drawn floors/walls/hatch
+    main.py       - window, title screen, map + camera, side panel, game over / victory screens
+    tests/test_game.py - 11 automatic tests incl. a robot that plays 150 full games
+    README.md, requirements.txt
+- Room types with own floor art: kitchen (grey checker), dining (red/cream tablecloth checker),
+  freezer (icy blue), storage (wood planks); tunnels are red Mars dust.
+- 5 floors; floor 5 has the Giant Calzone instead of a hatch. Permadeath.
+- TESTING:
+    * Unit tests: all rule tests passed (map always connected on 150 seeds x 5 floors, no spawns in walls,
+      combat, pizza healing, item pickup, death, victory, sprite sizes).
+    * Headless screenshots of title / gameplay / boss / game over / victory screens checked visually - OK.
+    * Robot playtest #1: 0 wins / 150 -> game too hard.
+- BALANCE CHANGES: fewer monsters per room, monster attack scales slower with floor,
+  +1 HP regen every 10 turns. Robot playtest #2: 8 wins / 150 (most deaths: Alien Anchovy, boss).
+  Then: Anchovy 9hp/4atk -> 8hp/3atk, Calzone 45hp/6atk -> 40hp/5atk.
+- Robot playtest #3 (after anchovy/boss nerf): 45 wins / 150 (30%), average floor 4.6. Good difficulty
+  for a roguelike - a careful human should win more often than the robot.
+
+[2026-11-10 11:59] FINAL CHECKS BEFORE HANDING OVER (3 rounds)
+- Round 1: full unit test suite -> 11/11 OK.
+- Round 2: headless screenshots of all screens re-checked + key handling (start, move, eat, wait,
+  restart with R, quit with ESC) -> OK.
+- Round 3: game launched through the real main loop with simulated key presses for 150 frames -> OK,
+  no errors; all .py files compile.
+- NOTE: the AI's sandbox has no screen, so the user should do one manual playtest on their PC.
+
+HOW TO PLAY:   .venv/bin/python main.py
+HOW TO TEST:   .venv/bin/python -m unittest discover -s tests -v
+
+IDEAS FOR NEXT STEPS (not done yet)
+- Sound effects (jsfxr) + music
+- Replace code-drawn sprites with your own Piskel PNGs
+- More items (hot sauce = fire attack, garlic bread = shield), ranged weapon (throwing pizza dough)
+- Decorations: ovens, tables, Mars windows; save high scores to a file
+- Git repository to show progress history
+
+[2026-11-10 12:02] Session 1 (cont.)
+- Set up Git: git init, .gitignore (ignores .venv and __pycache__), first commit of the whole project.
+- Told user how to start the game. User confirmed AI-made sprites are allowed (project is AI-assisted).
