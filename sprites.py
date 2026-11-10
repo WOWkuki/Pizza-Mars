@@ -1,10 +1,12 @@
 """Pixel art for Pizza Station Ares.
 
-Every character sprite is a 16x16 grid of letters. Each letter is a colour
-from PALETTE and '.' means transparent. You can redraw any sprite just by
+Every character and item sprite is a 16x16 grid of letters. Each letter is a
+colour from PALETTE and '.' means transparent. You can redraw any sprite just by
 editing the letters, or replace them with PNG files made in Piskel later.
-Floors, walls and the hatch are drawn with code further down.
+Floors, walls, obstacles, doors and the hatch are drawn with code further down.
 """
+
+import random
 
 PALETTE = {
     "k": (24, 14, 20),      # outline
@@ -229,11 +231,11 @@ SPRITES = {
 
 # Floor colours for each room type: (colour A, colour B)
 FLOOR_COLOURS = {
-    "kitchen": ((128, 126, 132), (100, 98, 108)),    # grey kitchen tiles
-    "dining":  ((140, 48, 46), (176, 150, 118)),     # red & cream, like a tablecloth
-    "freezer": ((112, 162, 192), (160, 205, 228)),   # icy blue
-    "storage": ((112, 76, 46), (82, 54, 32)),        # wooden planks
-    "dust":    ((160, 72, 42), (190, 96, 56)),       # red Mars dust
+    "kitchen": ((128, 126, 132), (104, 102, 112)),    # grey kitchen tiles
+    "dining":  ((140, 48, 46), (176, 150, 118)),      # red & cream tablecloth checker
+    "freezer": ((112, 162, 192), (154, 200, 224)),    # icy blue
+    "storage": ((118, 82, 50), (92, 62, 38)),         # wooden planks
+    "dust":    ((162, 74, 44), (190, 96, 56)),        # red Mars dust
 }
 
 
@@ -247,7 +249,6 @@ def _grid_to_surface(pygame, rows):
 
 
 def _floor_tile(pygame, kind, variant):
-    import random
     a, b = FLOOR_COLOURS[kind]
     surf = pygame.Surface((16, 16))
     surf.fill(a)
@@ -282,8 +283,43 @@ def _wall_tile(pygame, front):
             surf.set_at((x, y), (160, 160, 176))         # rivets
         surf.fill((232, 128, 40), (4, 9, 3, 1))         # little orange light
     else:
-        surf.fill((46, 46, 58))
-        pygame.draw.rect(surf, (62, 62, 78), (0, 0, 16, 16), 1)
+        surf.fill((52, 54, 68))
+        pygame.draw.rect(surf, (70, 72, 88), (0, 0, 16, 16), 1)
+    return surf
+
+
+def _obstacle_tile(pygame):
+    """A stainless-steel pizzeria counter / crate block inside the room."""
+    surf = pygame.Surface((16, 16))
+    surf.fill((24, 14, 20))
+    # Top steel counter surface
+    surf.fill((158, 164, 178), (1, 1, 14, 9))
+    surf.fill((205, 210, 222), (2, 2, 12, 2))
+    # Red & gold pizzeria trim band
+    surf.fill((185, 45, 40), (1, 10, 14, 2))
+    # Lower cabinet front
+    surf.fill((95, 100, 116), (1, 12, 14, 3))
+    surf.fill((250, 212, 80), (6, 13, 4, 1))
+    return surf
+
+
+def _door_tile(pygame, locked=False, boss=False):
+    """An Isaac-style doorway in the room wall."""
+    surf = pygame.Surface((16, 16))
+    frame_col = (195, 55, 50) if boss else (212, 150, 70)
+    surf.fill(frame_col)
+    if locked:
+        # Closed blast shutter with hazard bars
+        surf.fill((58, 60, 74), (2, 2, 12, 12))
+        for y in (4, 8, 12):
+            pygame.draw.line(surf, (250, 212, 80), (2, y), (13, y))
+        surf.fill((220, 50, 45), (6, 6, 4, 4))
+    else:
+        # Open warm passage
+        inner = (70, 20, 28) if boss else (42, 30, 24)
+        glow = (235, 95, 75) if boss else (245, 190, 95)
+        surf.fill(inner, (2, 2, 12, 12))
+        pygame.draw.rect(surf, glow, (3, 3, 10, 10), 1)
     return surf
 
 
@@ -300,21 +336,25 @@ def _hatch_tile(pygame):
 
 
 def build_sprites(scale):
-    """Turn all the art into scaled pygame surfaces.
-
-    Returns (sprites, floors, walls):
-      sprites["chef"] -> surface
-      floors["dust"]  -> list of 3 variants
-      walls["front"] / walls["top"] / sprites["hatch"]
-    """
+    """Turn all the art into scaled pygame surfaces."""
     import pygame
     size = 16 * scale
 
-    def big(surf):
-        return pygame.transform.scale(surf, (size, size))   # keeps pixels sharp
+    def big(surf, factor=1.0):
+        s = int(size * factor)
+        return pygame.transform.scale(surf, (s, s))
 
     sprites = {name: big(_grid_to_surface(pygame, rows)) for name, rows in SPRITES.items()}
+    sprites["calzone_boss"] = big(_grid_to_surface(pygame, SPRITES["calzone"]), 1.45)
     sprites["hatch"] = big(_hatch_tile(pygame))
     floors = {kind: [big(_floor_tile(pygame, kind, v)) for v in range(3)] for kind in FLOOR_COLOURS}
-    walls = {"front": big(_wall_tile(pygame, True)), "top": big(_wall_tile(pygame, False))}
+    walls = {
+        "front": big(_wall_tile(pygame, True)),
+        "top": big(_wall_tile(pygame, False)),
+        "obstacle": big(_obstacle_tile(pygame)),
+        "door_open": big(_door_tile(pygame, locked=False, boss=False)),
+        "door_locked": big(_door_tile(pygame, locked=True, boss=False)),
+        "door_boss_open": big(_door_tile(pygame, locked=False, boss=True)),
+        "door_boss_locked": big(_door_tile(pygame, locked=True, boss=True)),
+    }
     return sprites, floors, walls

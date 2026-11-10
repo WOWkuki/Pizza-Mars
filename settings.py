@@ -1,29 +1,34 @@
-"""Global settings for Pizza Station Ares.
+"""Global settings for Pizza Station Ares (Real-Time Action Roguelike).
 
 Change the numbers here to tweak the game without touching the other files.
 """
 
 TITLE = "Pizza Station Ares"
 
-# --- Graphics ---------------------------------------------------------------
-TILE = 16              # size of one pixel-art tile (16x16 pixels)
-SCALE = 2              # every pixel-art pixel is drawn as a SCALE x SCALE block
-CELL = TILE * SCALE    # size of one tile on the screen (32 px)
+# --- Graphics & Room Grid ---------------------------------------------------
+TILE = 16              # size of one pixel-art sprite (16x16 pixels)
+SCALE = 3              # every pixel-art pixel is drawn as a 3x3 block
+CELL = TILE * SCALE    # size of one tile on the screen (48 px)
 
-# --- Map --------------------------------------------------------------------
-MAP_W, MAP_H = 50, 34      # size of a whole floor in tiles
-VIEW_W, VIEW_H = 30, 20    # how many tiles fit on screen (the camera follows you)
+ROOM_W = 19            # tiles wide per room (including walls) -> 912 px
+ROOM_H = 13            # tiles tall per floor room (including walls) -> 624 px
+DOOR_X = ROOM_W // 2   # middle column for North/South doors (9)
+DOOR_Y = ROOM_H // 2   # middle row for West/East doors (6)
 
 # --- Window -----------------------------------------------------------------
+VIEW_W = ROOM_W * CELL             # 912 px play area width
+VIEW_H = ROOM_H * CELL             # 624 px play area height
 PANEL_W = 300                      # width of the info panel on the right
-SCREEN_W = VIEW_W * CELL + PANEL_W
-SCREEN_H = VIEW_H * CELL
-FPS = 30
+SCREEN_W = VIEW_W + PANEL_W        # 1212 px total window width
+SCREEN_H = VIEW_H                  # 624 px total window height
+FPS = 60                           # 60 frames per second for smooth action
 
 # --- Gameplay ---------------------------------------------------------------
-FOV_RADIUS = 7         # how far the chef can see
 FINAL_FLOOR = 5        # the Giant Calzone waits on this floor
 PLAYER_HP = 25
 PLAYER_ATTACK = 3
+PLAYER_SPEED = 220.0   # pixels per second
+FIRE_COOLDOWN = 0.26   # seconds between shots
+SHOT_SPEED = 540.0     # pixels per second for player shots
+IFRAME_TIME = 0.75     # seconds of invincibility after taking a hit
 PIZZA_HEAL = 8
-REGEN_EVERY = 10       # the chef heals 1 HP every this many turns

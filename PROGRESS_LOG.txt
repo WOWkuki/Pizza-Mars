@@ -78,3 +78,29 @@ IDEAS FOR NEXT STEPS (not done yet)
 [2026-11-10 12:02] Session 1 (cont.)
 - Set up Git: git init, .gitignore (ignores .venv and __pycache__), first commit of the whole project.
 - Told user how to start the game. User confirmed AI-made sprites are allowed (project is AI-assisted).
+
+[2026-11-10 12:12-12:27] Session 2 - REWORKED INTO ISAAC-STYLE REAL-TIME ACTION ROGUELIKE
+- Checked PROGRESS_LOG.txt first as required.
+- User requested:
+    1. Real-time movement and combat like The Binding of Isaac (not turn-based).
+    2. Aim with the mouse cursor and shoot with Left Mouse Button (LMB).
+    3. One room fills the screen; doors lock when enemies are present and unlock once cleared.
+    4. Much higher visibility so the whole room is lit up and clearly visible.
+- Changes made across the codebase:
+    * settings.py: 60 FPS, 19x13 room grid at 48px tiles (SCALE=3), real-time speeds & cooldowns.
+    * dungeon.py: Isaac-style floor generator creating connected single-screen rooms (Start, Normal,
+      Treasure/Supply '$', and Boss 'B' rooms) with N/S/E/W doors and symmetric kitchen/table obstacles.
+    * entities.py: Real-time Player (smooth movement, mouse aim angle, shot cooldown, i-frames),
+      Monster (real-time AI: wobbling Meatballs, hovering/shooting Drones, lunging Anchovies,
+      and Giant Calzone boss firing 3-way molten cheese spreads), and Projectile class.
+    * sprites.py: Added door sprites (open/locked/boss) and stainless-steel pizzeria counter obstacles.
+    * game.py: Real-time update(dt) loop, mouse-aimed shooting, door locking/unlocking on room clear,
+      room transitions, floor guardian hatch spawning, sauce splash particles, obstacle sliding.
+    * main.py: Full-room bright lighting with subtle warm edge vignette, custom aiming crosshair at
+      mouse cursor, LMB shooting, WASD movement, and Isaac-style Floor Minimap on the side panel.
+    * tests/test_game.py & README.md: Updated all unit tests + real-time AI bot (60 full games).
+- MULTIPLE CHECKS BEFORE FINISHING:
+    * Check 1 (Unit tests + 60 full robot playthroughs): 11/11 tests passed, 60/60 games completed without getting stuck.
+    * Check 2 (Visual screenshots): Rendered and inspected title, combat room, boss fight, game over, and win screens.
+    * Check 3 (Real window loop + input simulation): Ran 150 frames of mouse aiming, LMB shooting, movement, and quitting -> OK.
+- Committed changes to Git.
