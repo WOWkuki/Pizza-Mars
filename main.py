@@ -43,16 +43,16 @@ class App:
         pygame.display.set_caption(TITLE)
 
         self.profile = load_profile()
-        res_idx = self.profile.get("resolution_index", 1)
+        res_idx = self.profile.get("resolution_index", 2)
         if not (0 <= res_idx < len(RESOLUTIONS)):
-            res_idx = 1
+            res_idx = 2
         self.res_index = res_idx
         self.window_size = RESOLUTIONS[self.res_index][1]
         self.graphics = self.profile.get("graphics_quality", "High")
         if self.graphics not in GRAPHICS_LEVELS:
             self.graphics = "High"
 
-        self.display = pygame.display.set_mode(self.window_size)
+        self.display = pygame.display.set_mode(self.window_size, pygame.RESIZABLE)
         # All drawing uses the logical 1212x624 surface and scales to self.display
         self.screen = pygame.Surface((SCREEN_W, SCREEN_H))
         self.clock = pygame.time.Clock()
@@ -93,15 +93,15 @@ class App:
         return surf
 
     def to_canvas_pos(self, pos):
-        """Convert window mouse coordinates to logical 1212x624 canvas coordinates."""
+        """Convert actual window mouse coordinates to logical 1212x624 canvas coordinates."""
         wx, wy = pos
-        ww, wh = self.window_size
-        return int(wx * SCREEN_W / max(1, ww)), int(wy * SCREEN_H / max(1, wh))
+        dw, dh = self.display.get_size()
+        return int(wx * SCREEN_W / max(1, dw)), int(wy * SCREEN_H / max(1, dh))
 
     def apply_resolution(self, index):
         self.res_index = index % len(RESOLUTIONS)
         self.window_size = RESOLUTIONS[self.res_index][1]
-        self.display = pygame.display.set_mode(self.window_size)
+        self.display = pygame.display.set_mode(self.window_size, pygame.RESIZABLE)
         self.profile["resolution_index"] = self.res_index
         save_profile(self.profile)
 
@@ -901,10 +901,15 @@ class App:
                 self.draw_end_screen()
 
     def present(self):
-        if self.window_size == (SCREEN_W, SCREEN_H):
-            self.display.blit(self.screen, (0, 0))
-        else:
-            pygame.transform.scale(self.screen, self.window_size, self.display)
+        """Scale logical canvas to the selected resolution and fit the actual window."""
+        dw, dh = self.display.get_size()
+        rw, rh = self.window_size
+        surf = self.screen
+        if (rw, rh) != (SCREEN_W, SCREEN_H):
+            surf = pygame.transform.scale(surf, (rw, rh))
+        if surf.get_size() != (dw, dh):
+            surf = pygame.transform.scale(surf, (dw, dh))
+        self.display.blit(surf, (0, 0))
         pygame.display.flip()
 
     # ------------------------------------------------------------ main loop

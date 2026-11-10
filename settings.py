@@ -23,12 +23,13 @@ SCREEN_W = VIEW_W + PANEL_W        # 1212 px total canvas width
 SCREEN_H = VIEW_H                  # 624 px total canvas height
 FPS = 60                           # 60 frames per second for smooth action
 
-# Available window resolutions in the Settings menu
+# Available window & render resolutions in the Settings menu
 RESOLUTIONS = [
-    ("1010x520 (Compact)", (1010, 520)),
-    ("1212x624 (Default)", (1212, 624)),
-    ("1454x748 (Large)",   (1454, 748)),
-    ("1696x874 (HD+)",     (1696, 874)),
+    ("606x312 (Retro Low-Res)", (606, 312)),
+    ("1010x520 (Compact)",      (1010, 520)),
+    ("1212x624 (Default)",      (1212, 624)),
+    ("1454x748 (Large)",        (1454, 748)),
+    ("1696x874 (HD+)",          (1696, 874)),
 ]
 GRAPHICS_LEVELS = ["Low", "Medium", "High"]
 

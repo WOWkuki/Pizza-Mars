@@ -160,3 +160,20 @@ IDEAS FOR NEXT STEPS (not done yet)
       Settings Menu, and Polar Cryo-Vaults boss room.
     * Check 3 (Real window loop): Simulated menu navigation, starting a map, shooting, F5 save, and quit -> OK.
 - Committed changes to Git.
+
+[2026-11-10 15:23-15:26] Session 5 - FIXED RESOLUTION SCALING CRASH ON TILING WINDOW MANAGERS
+- Checked PROGRESS_LOG.txt first as required.
+- User reported ValueError in present(): `pygame.transform.scale(self.screen, self.window_size, self.display)`
+  when changing resolution.
+- Cause: On tiling window managers (like Hyprland / Omarchy), `self.display.get_size()` is controlled
+  by the window manager and can differ from `self.window_size`, so passing `self.display` as the
+  3rd argument to `pygame.transform.scale(..., self.window_size, self.display)` raised ValueError.
+- Fix in main.py & settings.py:
+    * `present()` now scales the canvas to the selected resolution `self.window_size` (so even in a
+      tiled window you can see the resolution change, including a new 606x312 Retro Low-Res mode) and
+      then fits it cleanly to `self.display.get_size()` before blitting.
+    * `to_canvas_pos()` uses `self.display.get_size()` so mouse clicks and aiming stay aligned even
+      when the window manager tiles or resizes the window.
+- Tested cycling through all resolutions while simulating a fixed-size tiled display surface + ran
+  screenshots and window loop checks -> all pass.
+- Committed fix to Git.

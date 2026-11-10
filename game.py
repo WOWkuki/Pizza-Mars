@@ -44,7 +44,7 @@ SAVEGAME_PATH = os.path.join(ROOT_DIR, "savegame.json")
 # ---------------------------------------------------------------------------
 def default_profile():
     return {
-        "resolution_index": 1,         # 1212x624 (Default)
+        "resolution_index": 2,         # 1212x624 (Default)
         "graphics_quality": "High",    # "Low", "Medium", "High"
         "unlocked_maps": ["ares_station"],
         "best_scores": {},
