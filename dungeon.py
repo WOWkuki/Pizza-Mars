@@ -10,7 +10,7 @@ Every floor is a grid of single-screen rooms connected by N/S/E/W doors:
 """
 
 import math
-from settings import ROOM_W, ROOM_H, DOOR_X, DOOR_Y, CELL, MAPS
+from settings import ROOM_W, ROOM_H, DOOR_X, DOOR_Y, CELL
 
 WALL = "#"
 FLOOR = "."
@@ -292,10 +292,8 @@ class Room:
 class Dungeon:
     """A floor made of connected single-screen rooms (like The Binding of Isaac)."""
 
-    def __init__(self, rng, num_rooms=8, map_id="ares_station"):
+    def __init__(self, rng, num_rooms=8):
         self.rng = rng
-        self.map_id = map_id if map_id in MAPS else "ares_station"
-        self.map_info = MAPS[self.map_id]
         self.rooms = {}           # (gx, gy) -> Room
         self.start_pos = (0, 0)
         self.boss_pos = (0, 0)
@@ -303,9 +301,7 @@ class Dungeon:
         self.generate(num_rooms=num_rooms)
 
     def generate(self, num_rooms=8):
-        styles = self.map_info["styles"]
-        start_style = styles[0]
-        self.rooms = {(0, 0): Room(0, 0, style=start_style, role="start")}
+        self.rooms = {(0, 0): Room(0, 0, style="kitchen", role="start")}
         frontier = [(0, 0)]
 
         attempts = 0
@@ -323,7 +319,7 @@ class Dungeon:
             )
             if neighbors > 1 and self.rng.random() < 0.7:
                 continue
-            style = self.rng.choice(styles)
+            style = self.rng.choice(ROOM_STYLES)
             self.rooms[cand] = Room(cand[0], cand[1], style=style, role="normal")
             frontier.append(cand)
 
@@ -342,7 +338,7 @@ class Dungeon:
         self.boss_pos = max(pool, key=lambda p: abs(p[0]) + abs(p[1]))
         boss_room = self.rooms[self.boss_pos]
         boss_room.role = "boss"
-        boss_room.style = self.map_info["boss_style"]
+        boss_room.style = "kitchen"
         boss_room.cleared = False
 
         # Pick a Treasure Room: another room (preferably dead-end) not start or boss

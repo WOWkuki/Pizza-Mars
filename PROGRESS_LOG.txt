@@ -177,3 +177,43 @@ IDEAS FOR NEXT STEPS (not done yet)
 - Tested cycling through all resolutions while simulating a fixed-size tiled display surface + ran
   screenshots and window loop checks -> all pass.
 - Committed fix to Git.
+
+[2026-11-11 08:30-08:55] Session 6 - REMOVED EXTRA MAPS, ADDED LOGIN / SIGN UP ACCOUNT SYSTEM (SQLite)
+- Checked PROGRESS_LOG.txt first as required.
+- User feedback: the 4 maps were "the same thing with a different name" -> removed them completely:
+    * settings.py: deleted MAPS and MAP_ORDER.
+    * dungeon.py: restored the pre-maps version (rooms use all 5 styles again, kitchen boss room).
+    * game.py: removed map_id / map_info / map difficulty / record_progress (map unlocks).
+    * main.py: removed the Map Select screen; "Start New Game" now starts a run directly.
+- NEW database.py (Python's built-in sqlite3, file: accounts.db, ignored by Git):
+    * accounts table: username, SHA-256 password hash, high_score, highest_floor, total_kills,
+      games_won, full_progress, settings_json, saved_run_json.
+    * signup_user / login_user / get_account / update_account_settings / save_account_run /
+      record_account_run_end. Usernames are case-insensitive unique, min 2 chars.
+    * Auto-creates the test account admin / admin with FULL PROGRESS: best score 9999, floor 5,
+      10 wins, 250 kills, and a ready Floor 5 saved run (Pizza Cutter, Apron, 35 HP, 4 pizzas,
+      250 credits). After admin finishes a run, that Floor 5 test save is rebuilt.
+- game.py: save_run / load_run / has_saved_run / get_save_summary take a `username`. Logged in ->
+  saved to the account row in the database; Guest -> savegame.json like before.
+  Game(full_progress=True) starts with Pizza Cutter + Heat-Shield Apron + 35 HP + 3 pizzas.
+  Winning once sets full_progress on your own account.
+- main.py:
+    * Bottom-right LOGIN / SIGN UP button on the Starter Menu (shows "ACCOUNT: name, Best, Floor"
+      when logged in). Also reachable with the L key or Up/Down navigation.
+    * New "CHEF LOGIN" screen: Username + Password fields (click or TAB to switch, password shown
+      as ****, blinking cursor), LOG IN, SIGN UP, LOG OUT, BACK, error/success messages, and a hint
+      for the admin/admin test account.
+    * Logging in loads the account's settings (resolution + graphics), stats and saved run; the last
+      logged-in account is remembered in profile.json between launches. Settings are saved per account.
+    * Side panel shows who is logged in; end screen shows the account's best score.
+- tests/test_game.py: replaced map tests with account tests (admin full progress + Floor 5 load,
+  wrong password, duplicate/short usernames, sign up -> save -> load -> win -> stats/full progress,
+  settings saving) and a full-progress gear test. Uses a temp DB in /tmp.
+- Scratch checks now use a temporary database and back up/restore the real profile.json/savegame.json.
+- MULTIPLE CHECKS BEFORE FINISHING:
+    * Check 1 (Unit & Bot tests): 18/18 pass (60 robot games, no crashes).
+    * Check 2 (Visual screenshots): Guest title, login error, admin title, admin play menu (Floor 5
+      save), admin boss fight with full gear, new-user gameplay, logged-in login screen, settings.
+    * Check 3 (Real main loop): clicked the bottom-right Login button, typed admin / TAB / admin /
+      ENTER, PLAY -> LOAD, shot, F5, M, quit -> OK, loaded on Floor 5 with the Pizza Cutter.
+- README.md updated. Committed to Git.

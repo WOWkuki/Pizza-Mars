@@ -1,7 +1,11 @@
-"""Real-time Isaac-style game rules, map campaigns, and save/load system.
+"""Real-time Isaac-style game rules and the save/load system.
 
 There is no pygame drawing code in this file. That keeps the rules easy to
 read and lets us test the game automatically (see tests/test_game.py).
+
+Saved runs go to:
+  * the logged-in account's row in the SQLite database (database.py), or
+  * savegame.json when you play as a Guest (not logged in).
 """
 
 import json
@@ -12,11 +16,11 @@ import random
 from settings import (
     CELL, DOOR_X, DOOR_Y,
     FINAL_FLOOR, SHOT_SPEED, IFRAME_TIME, PIZZA_HEAL,
-    MAPS, MAP_ORDER,
 )
 from dungeon import Dungeon, HATCH, OPPOSITE_DIR, DOOR_TILES
 from entities import Player, Monster, Projectile, DEATH_TEXT
 from items import Item, ITEM_TYPES
+import database
 
 # Message colours (R, G, B)
 WHITE = (230, 230, 230)
@@ -38,16 +42,18 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROFILE_PATH = os.path.join(ROOT_DIR, "profile.json")
 SAVEGAME_PATH = os.path.join(ROOT_DIR, "savegame.json")
 
+# Starting gear for accounts with "full progress" (e.g. the admin test account)
+FULL_PROGRESS_GEAR = {"max_hp": 35, "weapon": "cutter", "armor": "apron", "pizzas": 3}
+
 
 # ---------------------------------------------------------------------------
-# Profile (settings + unlocked maps) and Savegame persistence
+# Guest profile (settings when not logged in)
 # ---------------------------------------------------------------------------
 def default_profile():
     return {
         "resolution_index": 2,         # 1212x624 (Default)
         "graphics_quality": "High",    # "Low", "Medium", "High"
-        "unlocked_maps": ["ares_station"],
-        "best_scores": {},
+        "best_score": 0,
     }
 
 
@@ -61,8 +67,6 @@ def load_profile(path=PROFILE_PATH):
                 prof.update(data)
         except (OSError, ValueError):
             pass
-    if "ares_station" not in prof["unlocked_maps"]:
-        prof["unlocked_maps"].insert(0, "ares_station")
     return prof
 
 
@@ -74,52 +78,29 @@ def save_profile(prof, path=PROFILE_PATH):
         pass
 
 
-def record_progress(game, prof=None, path=PROFILE_PATH):
-    """Check if the player unlocked a new map or beat their high score."""
-    if prof is None:
-        prof = load_profile(path)
-    unlocked = prof.setdefault("unlocked_maps", ["ares_station"])
-    newly_unlocked = []
-
-    # Reaching Floor 3 or winning Map 1 unlocks Map 2 (Cryo-Vaults)
-    if (game.floor >= 3 or game.state == "won") and "cryo_vaults" not in unlocked:
-        unlocked.append("cryo_vaults")
-        newly_unlocked.append(MAPS["cryo_vaults"]["name"])
-
-    # Reaching Floor 5 on Cryo-Vaults or beating Cryo-Vaults unlocks Map 3 (Lava Ovens)
-    if (
-        (game.map_id == "cryo_vaults" and (game.state == "won" or game.floor >= 5))
-        or (game.state == "won" and "cryo_vaults" in unlocked and game.map_id != "ares_station")
-    ) and "lava_ovens" not in unlocked:
-        unlocked.append("lava_ovens")
-        newly_unlocked.append(MAPS["lava_ovens"]["name"])
-
-    # Beating Lava Ovens unlocks Map 4 (Anchovy Mothership)
-    if game.map_id == "lava_ovens" and game.state == "won" and "mothership" not in unlocked:
-        unlocked.append("mothership")
-        newly_unlocked.append(MAPS["mothership"]["name"])
-
-    #Also if you win any map, unlock the next map in MAP_ORDER
-    if game.state == "won" and game.map_id in MAP_ORDER:
-        idx = MAP_ORDER.index(game.map_id)
-        if idx + 1 < len(MAP_ORDER):
-            nxt = MAP_ORDER[idx + 1]
-            if nxt not in unlocked:
-                unlocked.append(nxt)
-                newly_unlocked.append(MAPS[nxt]["name"])
-
-    best = prof.setdefault("best_scores", {})
-    if game.score > best.get(game.map_id, 0):
-        best[game.map_id] = game.score
-
-    save_profile(prof, path)
-    return newly_unlocked
+# ---------------------------------------------------------------------------
+# Saved runs: database when logged in, savegame.json for Guests
+# ---------------------------------------------------------------------------
+def _read_run_data(username=None, path=SAVEGAME_PATH, db_path=None):
+    """Return the raw saved-run dictionary (or None)."""
+    if username:
+        acc = database.get_account(username, db_path=db_path)
+        return acc["saved_run"] if acc else None
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
 
 
-def save_run(game, path=SAVEGAME_PATH):
-    """Save an active run to disk as JSON."""
+def save_run(game, username=None, path=SAVEGAME_PATH, db_path=None):
+    """Save an active run (to the account's database row, or to disk for Guests)."""
     if game is None or game.state != "playing":
         return False
+    if username:
+        return database.save_account_run(username, game, db_path=db_path)
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(game.to_dict(), f, indent=2)
@@ -128,7 +109,10 @@ def save_run(game, path=SAVEGAME_PATH):
         return False
 
 
-def clear_saved_run(path=SAVEGAME_PATH):
+def clear_saved_run(username=None, path=SAVEGAME_PATH):
+    """Delete the Guest savegame. (Account saves are cleared by record_run_end.)"""
+    if username:
+        return
     if os.path.exists(path):
         try:
             os.remove(path)
@@ -136,36 +120,44 @@ def clear_saved_run(path=SAVEGAME_PATH):
             pass
 
 
-def has_saved_run(path=SAVEGAME_PATH):
-    return os.path.exists(path)
+def record_run_end(game, username=None, prof=None, db_path=None):
+    """Store stats when a run ends (dead or won) and remove the finished save."""
+    if username:
+        database.record_account_run_end(username, game, db_path=db_path)
+    else:
+        if prof is not None and game.score > prof.get("best_score", 0):
+            prof["best_score"] = game.score
+            save_profile(prof)
+        clear_saved_run()
 
 
-def get_save_summary(path=SAVEGAME_PATH):
+def has_saved_run(username=None, path=SAVEGAME_PATH, db_path=None):
+    return _read_run_data(username, path, db_path) is not None
+
+
+def get_save_summary(username=None, path=SAVEGAME_PATH, db_path=None):
     """Return a short description of the saved game for the Load button."""
-    if not os.path.exists(path):
+    data = _read_run_data(username, path, db_path)
+    if not data:
         return None
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        map_name = MAPS.get(data.get("map_id", "ares_station"), MAPS["ares_station"])["name"]
         floor = data.get("floor", 1)
         p = data.get("player", {})
         hp = p.get("hp", 25)
         max_hp = p.get("max_hp", 25)
-        return f"{map_name} - Floor {floor}/{FINAL_FLOOR} (HP {hp}/{max_hp})"
-    except (OSError, ValueError, KeyError):
+        return f"Floor {floor}/{FINAL_FLOOR}: {FLOOR_NAMES.get(floor, '')} (HP {hp}/{max_hp})"
+    except (AttributeError, KeyError):
         return None
 
 
-def load_run(path=SAVEGAME_PATH):
+def load_run(username=None, path=SAVEGAME_PATH, db_path=None):
     """Load and return a saved Game instance, or None if invalid."""
-    if not os.path.exists(path):
+    data = _read_run_data(username, path, db_path)
+    if not data:
         return None
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
         return Game.from_dict(data)
-    except (OSError, ValueError, KeyError):
+    except (ValueError, KeyError, TypeError):
         return None
 
 
@@ -173,10 +165,9 @@ def load_run(path=SAVEGAME_PATH):
 # Main Game Simulation
 # ---------------------------------------------------------------------------
 class Game:
-    def __init__(self, seed=None, map_id="ares_station"):
+    def __init__(self, seed=None, full_progress=False):
         self.seed = seed if seed is not None else random.randrange(1_000_000)
-        self.map_id = map_id if map_id in MAPS else "ares_station"
-        self.map_info = MAPS[self.map_id]
+        self.full_progress = bool(full_progress)
         self.rng = random.Random(self.seed)
         self.floor_seed = self.seed
         self.messages = []          # list of (text, colour)
@@ -185,7 +176,6 @@ class Game:
         self.time = 0.0             # elapsed seconds played
         self.rooms_cleared = 0
         self.killer = None
-        self.unlocked_notice = []
         self.player = Player(0, 0)
         self.projectiles = []       # active shots in the current room
         self.particles = []         # small visual hit/sauce splashes
@@ -193,8 +183,20 @@ class Game:
         self.hatch_cooldown = 0.0
         self.current_pos = (0, 0)
         self.new_floor()
-        self.log(f"Entered {self.map_info['name']} ({self.map_info['subtitle']})!", ORANGE)
+        self.log("Welcome to Pizza Station Ares, chef!", ORANGE)
         self.log("Move with WASD, aim with the mouse, and shoot with Left Click!", WHITE)
+        if self.full_progress:
+            self.apply_full_progress()
+
+    def apply_full_progress(self):
+        """Give the master chef gear unlocked by accounts with full progress."""
+        p = self.player
+        p.max_hp = FULL_PROGRESS_GEAR["max_hp"]
+        p.hp = p.max_hp
+        p.weapon = FULL_PROGRESS_GEAR["weapon"]
+        p.armor = FULL_PROGRESS_GEAR["armor"]
+        p.pizzas = FULL_PROGRESS_GEAR["pizzas"]
+        self.log("FULL PROGRESS: You start with the Pizza Cutter & Heat-Shield Apron!", YELLOW)
 
     # ------------------------------------------------------------------ utils
     @property
@@ -219,15 +221,13 @@ class Game:
     @property
     def score(self):
         p = self.player
-        diff_bonus = self.map_info["difficulty"]
-        base = (
+        return (
             p.credits
             + p.kills * 10
             + self.rooms_cleared * 15
             + (self.floor - 1) * 50
             + (500 if self.state == "won" else 0)
         )
-        return base + (diff_bonus - 1) * 75
 
     def log(self, text, colour=WHITE):
         self.messages.append((text, colour))
@@ -267,7 +267,7 @@ class Game:
         return {
             "seed": self.seed,
             "floor_seed": self.floor_seed,
-            "map_id": self.map_id,
+            "full_progress": self.full_progress,
             "floor": self.floor,
             "time": self.time,
             "rooms_cleared": self.rooms_cleared,
@@ -288,7 +288,8 @@ class Game:
 
     @classmethod
     def from_dict(cls, data):
-        g = cls(seed=data["seed"], map_id=data.get("map_id", "ares_station"))
+        g = cls(seed=data["seed"])
+        g.full_progress = bool(data.get("full_progress", False))
         g.floor = data.get("floor", 1)
         g.floor_seed = data.get("floor_seed", g.seed + g.floor * 100)
         g.time = data.get("time", 0.0)
@@ -297,7 +298,7 @@ class Game:
 
         # Rebuild floor layout deterministically from floor_seed
         num_rooms = 6 + g.floor
-        g.dungeon = Dungeon(random.Random(g.floor_seed), num_rooms=num_rooms, map_id=g.map_id)
+        g.dungeon = Dungeon(random.Random(g.floor_seed), num_rooms=num_rooms)
 
         p_data = data["player"]
         p = g.player
@@ -342,7 +343,7 @@ class Game:
         c_pos = tuple(data.get("current_pos", [0, 0]))
         g.current_pos = c_pos if c_pos in g.dungeon.rooms else (0, 0)
         g.messages.clear()
-        g.log(f"Loaded saved game on {g.map_info['name']} (Floor {g.floor})!", CYAN)
+        g.log(f"Loaded saved game (Floor {g.floor}: {FLOOR_NAMES.get(g.floor, '')})!", CYAN)
         return g
 
     # ------------------------------------------------------------ floor setup
@@ -352,7 +353,6 @@ class Game:
         self.dungeon = Dungeon(
             random.Random(self.floor_seed),
             num_rooms=num_rooms,
-            map_id=self.map_id,
         )
         self.projectiles.clear()
         self.particles.clear()
@@ -360,11 +360,10 @@ class Game:
         self.enter_room((0, 0), from_dir=None)
 
     def pick_monster_type(self):
-        diff = self.map_info["difficulty"]
         weights = {
             "meatball": 6,
-            "drone": 2 + self.floor + (2 if self.map_id == "cryo_vaults" else 0),
-            "anchovy": max(1, 2 * self.floor - 1 + (diff - 1)),
+            "drone": 2 + self.floor,
+            "anchovy": max(1, 2 * self.floor - 1),
         }
         return self.rng.choices(list(weights), weights=list(weights.values()))[0]
 
@@ -383,14 +382,10 @@ class Game:
     def populate_floor(self):
         cx = (DOOR_X + 0.5) * CELL
         cy = (DOOR_Y + 0.5) * CELL
-        diff_bonus = self.floor - 1 + (self.map_info["difficulty"] - 1)
+        diff_bonus = self.floor - 1
 
         for pos, room in self.dungeon.rooms.items():
             if room.role == "start":
-                # On harder maps, give an extra pizza or oxygen in the starting room
-                if self.floor == 1 and self.map_info["difficulty"] >= 2:
-                    sx, sy = room.random_free_pixel(self.rng, avoid_center=True, margin_tiles=2)
-                    room.items.append(Item("pizza", sx, sy))
                 continue
 
             if room.role == "treasure":
@@ -405,9 +400,7 @@ class Game:
 
             if room.role == "boss":
                 if self.floor == FINAL_FLOOR:
-                    boss = Monster(cx, cy, "calzone", diff_bonus)
-                    boss.name = self.map_info["boss_name"]
-                    room.monsters.append(boss)
+                    room.monsters.append(Monster(cx, cy, "calzone", diff_bonus))
                 else:
                     kind = "anchovy" if self.floor >= 2 else "drone"
                     room.monsters.append(Monster(cx, cy, kind, diff_bonus, mini_boss=True))
@@ -462,7 +455,7 @@ class Game:
             self.player.iframe_timer = max(self.player.iframe_timer, 0.45)
             if room.role == "boss":
                 if self.floor == FINAL_FLOOR:
-                    self.log(f"BOSS ROOM: {self.map_info['boss_name']} blocks your way!", YELLOW)
+                    self.log(f"BOSS ROOM: {room.monsters[0].name} blocks your way!", YELLOW)
                 else:
                     self.log(f"Floor Guardian: Defeat {room.monsters[0].name} to open the hatch!", ORANGE)
             else:
@@ -761,7 +754,7 @@ class Game:
             self.state = "won"
             self.room.locked = False
             self.room.cleared = True
-            self.log(f"You defeated {m.name} and saved {self.map_info['name']}!", YELLOW)
+            self.log(f"You defeated the {m.name} and saved Pizza Station Ares!", YELLOW)
 
     def check_room_clear(self):
         room = self.room

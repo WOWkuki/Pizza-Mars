@@ -12,14 +12,15 @@ import pygame
 from settings import (
     TITLE, CELL, ROOM_W, ROOM_H, VIEW_W, VIEW_H, PANEL_W,
     SCREEN_W, SCREEN_H, FPS, SCALE, FINAL_FLOOR,
-    RESOLUTIONS, GRAPHICS_LEVELS, MAPS, MAP_ORDER,
+    RESOLUTIONS, GRAPHICS_LEVELS,
 )
 from dungeon import WALL, OBSTACLE, DOOR, HATCH, DOOR_TILES
 from game import (
     Game, FLOOR_NAMES,
-    load_profile, save_profile, record_progress,
-    save_run, load_run, has_saved_run, get_save_summary, clear_saved_run,
+    load_profile, save_profile, record_run_end,
+    save_run, load_run, has_saved_run, get_save_summary,
 )
+import database
 from items import ITEM_TYPES
 from sprites import build_sprites
 
@@ -35,6 +36,9 @@ CYAN = (100, 210, 240)
 
 EAT_KEYS = (pygame.K_h, pygame.K_e, pygame.K_SPACE, pygame.K_1)
 START_KEYS = (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE)
+ENTER_KEYS = (pygame.K_RETURN, pygame.K_KP_ENTER)
+MAX_NAME_LEN = 16
+MAX_PASS_LEN = 24
 
 
 class App:
@@ -42,7 +46,12 @@ class App:
         pygame.init()
         pygame.display.set_caption(TITLE)
 
+        # Make sure the SQLite account database exists (also creates admin/admin)
+        database.init_db()
+
         self.profile = load_profile()
+        self.current_user = None      # username when logged in, None = Guest
+        self.account = None           # account dict loaded from the database
         res_idx = self.profile.get("resolution_index", 2)
         if not (0 <= res_idx < len(RESOLUTIONS)):
             res_idx = 2
@@ -67,16 +76,29 @@ class App:
             (rng.randrange(SCREEN_W), rng.randrange(SCREEN_H), rng.choice((1, 2)))
             for _ in range(140)
         ]
-        # States: "title", "play_menu", "map_select", "settings", "playing"
+        # States: "title", "play_menu", "settings", "auth", "playing"
         self.state = "title"
         self.menu_index = 0
-        self.selected_map_idx = 0
         self.buttons = []         # list of (pygame.Rect, action_id) for the active menu
         self.game = None
         self.running = True
         self.frame = 0
         self.mouse_pos = (VIEW_W // 2, VIEW_H // 2)
         self.mouse_shooting = False
+
+        # Login / Sign Up screen state
+        self.auth_username = ""
+        self.auth_password = ""
+        self.auth_focus = "username"   # "username" or "password"
+        self.auth_message = ""
+        self.auth_msg_colour = DIM
+
+        # Remember the last logged-in account between launches
+        last_user = self.profile.get("last_user")
+        if last_user:
+            acc = database.get_account(last_user)
+            if acc is not None:
+                self.set_account(acc)
 
     def _build_room_vignette(self):
         """Soft warm edge shading so the whole room is bright and readable."""
@@ -98,27 +120,98 @@ class App:
         dw, dh = self.display.get_size()
         return int(wx * SCREEN_W / max(1, dw)), int(wy * SCREEN_H / max(1, dh))
 
-    def apply_resolution(self, index):
+    # -------------------------------------------------------------- settings
+    def _settings_dict(self):
+        return {"resolution_index": self.res_index, "graphics_quality": self.graphics}
+
+    def save_settings(self):
+        """Save settings to the logged-in account (database) or the guest profile."""
+        self.profile.update(self._settings_dict())
+        save_profile(self.profile)
+        if self.current_user:
+            database.update_account_settings(self.current_user, self._settings_dict())
+
+    def apply_resolution(self, index, save=True):
         self.res_index = index % len(RESOLUTIONS)
         self.window_size = RESOLUTIONS[self.res_index][1]
         self.display = pygame.display.set_mode(self.window_size, pygame.RESIZABLE)
-        self.profile["resolution_index"] = self.res_index
-        save_profile(self.profile)
+        if save:
+            self.save_settings()
 
     def cycle_graphics(self, step=1):
         idx = (GRAPHICS_LEVELS.index(self.graphics) + step) % len(GRAPHICS_LEVELS)
         self.graphics = GRAPHICS_LEVELS[idx]
-        self.profile["graphics_quality"] = self.graphics
+        self.save_settings()
+
+    # -------------------------------------------------------------- accounts
+    def set_account(self, acc):
+        """Log into `acc` (dict from database.py) and load its saved settings."""
+        self.account = acc
+        self.current_user = acc["username"]
+        self.profile["last_user"] = self.current_user
         save_profile(self.profile)
+        settings = acc.get("settings") or {}
+        gfx = settings.get("graphics_quality")
+        if gfx in GRAPHICS_LEVELS:
+            self.graphics = gfx
+        res = settings.get("resolution_index")
+        if isinstance(res, int) and 0 <= res < len(RESOLUTIONS) and res != self.res_index:
+            self.apply_resolution(res, save=False)
+
+    def refresh_account(self):
+        if self.current_user:
+            self.account = database.get_account(self.current_user)
+
+    def logout(self):
+        if self.game and self.game.state == "playing":
+            save_run(self.game, self.current_user)
+        self.game = None
+        self.current_user = None
+        self.account = None
+        self.profile["last_user"] = None
+        save_profile(self.profile)
+        self.auth_message = "Logged out. You are now playing as Guest."
+        self.auth_msg_colour = CYAN
+
+    def do_login(self):
+        ok, msg, acc = database.login_user(self.auth_username, self.auth_password)
+        self.auth_message = msg
+        self.auth_msg_colour = GREEN if ok else RED
+        if ok:
+            self.game = None
+            self.set_account(acc)
+            self.auth_password = ""
+            self.state = "title"
+            self.menu_index = 0
+
+    def do_signup(self):
+        ok, msg, acc = database.signup_user(self.auth_username, self.auth_password)
+        self.auth_message = msg
+        self.auth_msg_colour = GREEN if ok else RED
+        if ok:
+            self.game = None
+            self.set_account(acc)
+            self.auth_password = ""
+            self.state = "title"
+            self.menu_index = 0
+
+    def open_auth(self):
+        self.state = "auth"
+        self.menu_index = 0
+        self.auth_focus = "username"
+        self.auth_password = ""
+        self.auth_message = "Log in to load your progress, or Sign Up to create an account."
+        self.auth_msg_colour = DIM
 
     # ---------------------------------------------------------------- input
-    def new_game(self, seed=None, map_id="ares_station"):
-        self.game = Game(seed=seed, map_id=map_id)
+    def new_game(self, seed=None):
+        full = bool(self.account and self.account.get("full_progress"))
+        self.game = Game(seed=seed, full_progress=full)
         self.state = "playing"
-        save_run(self.game)
+        save_run(self.game, self.current_user)
 
     def continue_saved_game(self):
-        loaded = load_run()
+        loaded = load_run(self.current_user)
         if loaded is not None:
             self.game = loaded
             self.state = "playing"
@@ -128,23 +221,21 @@ class App:
     def trigger_menu_action(self, action):
         if action == "open_play":
             self.state = "play_menu"
-            self.menu_index = 0 if has_saved_run() else 1
+            self.menu_index = 0 if has_saved_run(self.current_user) else 1
         elif action == "open_settings":
             self.state = "settings"
             self.menu_index = 0
+        elif action == "open_auth":
+            self.open_auth()
         elif action == "quit":
             self.running = False
         elif action == "load_game":
             self.continue_saved_game()
-        elif action == "open_map_select":
-            self.state = "map_select"
-            self.menu_index = 0
+        elif action == "new_game":
+            self.new_game()
         elif action == "back_title":
             self.state = "title"
             self.menu_index = 0
-        elif action == "back_play":
-            self.state = "play_menu"
-            self.menu_index = 1
         elif action == "res_prev":
             self.apply_resolution(self.res_index - 1)
         elif action == "res_next":
@@ -153,33 +244,61 @@ class App:
             self.cycle_graphics(-1)
         elif action == "gfx_next":
             self.cycle_graphics(1)
-        elif action == "toggle_unlock_all":
-            unlocked = self.profile.setdefault("unlocked_maps", ["ares_station"])
-            if len(unlocked) < len(MAP_ORDER):
-                self.profile["unlocked_maps"] = list(MAP_ORDER)
-            else:
-                self.profile["unlocked_maps"] = ["ares_station"]
-            save_profile(self.profile)
-        elif action.startswith("start_map:"):
-            map_id = action.split(":", 1)[1]
-            if map_id in self.profile.get("unlocked_maps", ["ares_station"]):
-                self.new_game(map_id=map_id)
+        elif action == "focus_username":
+            self.auth_focus = "username"
+        elif action == "focus_password":
+            self.auth_focus = "password"
+        elif action == "auth_login":
+            self.do_login()
+        elif action == "auth_signup":
+            self.do_signup()
+        elif action == "auth_logout":
+            self.logout()
 
-    def handle_key(self, key):
+    def handle_auth_key(self, key, char):
+        """Typing into the Username / Password fields on the Login screen."""
+        if key == pygame.K_ESCAPE:
+            self.trigger_menu_action("back_title")
+        elif key == pygame.K_TAB or key in (pygame.K_UP, pygame.K_DOWN):
+            self.auth_focus = "password" if self.auth_focus == "username" else "username"
+        elif key in ENTER_KEYS:
+            if self.auth_focus == "username" and not self.auth_password:
+                self.auth_focus = "password"
+            else:
+                self.do_login()
+        elif key == pygame.K_BACKSPACE:
+            if self.auth_focus == "username":
+                self.auth_username = self.auth_username[:-1]
+            else:
+                self.auth_password = self.auth_password[:-1]
+        elif char and char.isprintable():
+            if self.auth_focus == "username":
+                if len(self.auth_username) < MAX_NAME_LEN and char != " ":
+                    self.auth_username += char
+            elif len(self.auth_password) < MAX_PASS_LEN:
+                self.auth_password += char
+
+    def handle_key(self, key, char=""):
+        if self.state == "auth":
+            self.handle_auth_key(key, char)
+            return
+
         if self.state == "title":
-            options = ["open_play", "open_settings", "quit"]
+            options = ["open_play", "open_settings", "quit", "open_auth"]
             if key == pygame.K_ESCAPE:
                 self.running = False
             elif key in (pygame.K_UP, pygame.K_w):
                 self.menu_index = (self.menu_index - 1) % len(options)
             elif key in (pygame.K_DOWN, pygame.K_s):
                 self.menu_index = (self.menu_index + 1) % len(options)
+            elif key == pygame.K_l:
+                self.trigger_menu_action("open_auth")
             elif key in START_KEYS:
                 self.trigger_menu_action(options[self.menu_index])
             return
 
         if self.state == "play_menu":
-            options = ["load_game", "open_map_select", "back_title"]
+            options = ["load_game", "new_game", "back_title"]
             if key == pygame.K_ESCAPE:
                 self.trigger_menu_action("back_title")
             elif key in (pygame.K_UP, pygame.K_w):
@@ -188,24 +307,9 @@ class App:
                 self.menu_index = (self.menu_index + 1) % len(options)
             elif key in START_KEYS:
                 act = options[self.menu_index]
-                if act == "load_game" and not has_saved_run():
-                    self.trigger_menu_action("open_map_select")
-                else:
-                    self.trigger_menu_action(act)
-            return
-
-        if self.state == "map_select":
-            if key == pygame.K_ESCAPE:
-                self.trigger_menu_action("back_play")
-            elif key in (pygame.K_LEFT, pygame.K_a, pygame.K_UP, pygame.K_w):
-                self.selected_map_idx = (self.selected_map_idx - 1) % len(MAP_ORDER)
-            elif key in (pygame.K_RIGHT, pygame.K_d, pygame.K_DOWN, pygame.K_s):
-                self.selected_map_idx = (self.selected_map_idx + 1) % len(MAP_ORDER)
-            elif key == pygame.K_u:
-                self.trigger_menu_action("toggle_unlock_all")
-            elif key in START_KEYS:
-                map_id = MAP_ORDER[self.selected_map_idx]
-                self.trigger_menu_action(f"start_map:{map_id}")
+                if act == "load_game" and not has_saved_run(self.current_user):
+                    act = "new_game"
+                self.trigger_menu_action(act)
             return
 
         if self.state == "settings":
@@ -238,24 +342,26 @@ class App:
         g = self.game
         if key == pygame.K_ESCAPE:
             if g and g.state == "playing":
-                save_run(g)
+                save_run(g, self.current_user)
             self.running = False
             return
         if key == pygame.K_m:
             # Save & return to starter menu
             if g and g.state == "playing":
-                save_run(g)
+                save_run(g, self.current_user)
+            self.refresh_account()
             self.state = "title"
             self.menu_index = 0
             return
         if key == pygame.K_F5 and g and g.state == "playing":
-            save_run(g)
-            g.log("Game saved! You can Load it anytime from the Play menu.", CYAN)
+            save_run(g, self.current_user)
+            where = f"account '{self.current_user}'" if self.current_user else "Guest save"
+            g.log(f"Game saved to {where}! Load it anytime from the Play menu.", CYAN)
             return
 
         if g.state != "playing":
             if key in (pygame.K_r, pygame.K_RETURN, pygame.K_KP_ENTER):
-                self.new_game(map_id=g.map_id)
+                self.new_game()
             return
         if key in EAT_KEYS:
             g.eat_pizza()
@@ -263,7 +369,7 @@ class App:
     def handle_mouse_down(self, button, pos):
         cpos = self.to_canvas_pos(pos)
         self.mouse_pos = cpos
-        if self.state in ("title", "play_menu", "map_select", "settings"):
+        if self.state in ("title", "play_menu", "settings", "auth"):
             if button == 1:
                 for rect, action in self.buttons:
                     if rect.collidepoint(cpos):
@@ -302,17 +408,12 @@ class App:
         lmb_held = bool(pygame.mouse.get_pressed()[0]) or self.mouse_shooting
         g.update(dt, dx, dy, aim_target=self.mouse_pos, shooting=lmb_held)
 
-        # Auto-save and check map unlocks when clearing a room, moving rooms, or finishing a run
+        # Auto-save when clearing a room, moving rooms, or finishing a run
         if g.state != "playing":
-            newly = record_progress(g, self.profile)
-            if newly:
-                g.unlocked_notice = newly
-            clear_saved_run()
+            record_run_end(g, self.current_user, self.profile)
+            self.refresh_account()
         elif g.current_pos != prev_pos or g.floor != prev_floor or g.rooms_cleared != prev_cleared:
-            newly = record_progress(g, self.profile)
-            for m_name in newly:
-                g.log(f"NEW MAP UNLOCKED: {m_name}!", YELLOW)
-            save_run(g)
+            save_run(g, self.current_user)
 
     # -------------------------------------------------------------- drawing
     def text(self, string, pos, colour=TEXT, font=None, center=False, shadow=False):
@@ -388,7 +489,7 @@ class App:
             pygame.draw.circle(self.screen, (140, 55, 34), (cx + dx, cy + dy), cr)
 
     def draw_title(self):
-        """Starter Main Menu with Play, Settings, and Quit buttons."""
+        """Starter Main Menu with Play, Settings, Quit, and the bottom-right Login button."""
         self.buttons = []
         self.draw_stars_and_mars()
         self.text("PIZZA STATION", (SCREEN_W // 2, 85), ORANGE, self.font_big, True, True)
@@ -404,9 +505,9 @@ class App:
             big = pygame.transform.scale(self.sprites[key], (60, 60))
             self.screen.blit(big, (start + i * 74, 225))
 
-        unlocked_cnt = len(self.profile.get("unlocked_maps", ["ares_station"]))
+        player_name = self.current_user or "Guest"
         self.text(
-            f"Unlocked Maps: {unlocked_cnt}/{len(MAP_ORDER)}    "
+            f"Playing as: {player_name}    "
             f"Resolution: {RESOLUTIONS[self.res_index][0]}    Graphics: {self.graphics}",
             (SCREEN_W // 2, 310), CYAN, center=True,
         )
@@ -422,9 +523,21 @@ class App:
             rect = pygame.Rect(bx, 342 + idx * 68, bw, bh)
             self.draw_button(rect, label, act, selected=(self.menu_index == idx), subtitle=sub)
 
+        # Bottom-right Login / Account button
+        r_login = pygame.Rect(SCREEN_W - 290, SCREEN_H - 82, 265, 58)
+        if self.account:
+            label = f"ACCOUNT: {self.account['username']}"[:22]
+            sub = f"Best {self.account['high_score']} | Floor {self.account['highest_floor']}"
+            if self.account.get("full_progress"):
+                sub += " | FULL"
+        else:
+            label = "LOGIN / SIGN UP"
+            sub = "Guest - click to log in"
+        self.draw_button(r_login, label, "open_auth", selected=(self.menu_index == 3), subtitle=sub)
+
         self.text(
-            "Click any button with the mouse  -or-  use Up/Down + ENTER",
-            (SCREEN_W // 2, SCREEN_H - 26), DIM, center=True,
+            "Click any button  -or-  Up/Down + ENTER   (L = Login)",
+            (SCREEN_W // 2 - 120, SCREEN_H - 26), DIM, center=True,
         )
 
     def draw_play_menu(self):
@@ -432,9 +545,10 @@ class App:
         self.buttons = []
         self.draw_stars_and_mars()
         self.text("SELECT PLAY MODE", (SCREEN_W // 2, 110), ORANGE, self.font_big, True, True)
-        self.text("Continue your previous shift or start a fresh mission", (SCREEN_W // 2, 165), TEXT, self.font_mid, True)
+        who = f"Account: {self.current_user}" if self.current_user else "Playing as Guest (log in to save to an account)"
+        self.text(who, (SCREEN_W // 2, 165), CYAN if self.current_user else TEXT, self.font_mid, True)
 
-        summary = get_save_summary()
+        summary = get_save_summary(self.current_user)
         has_save = summary is not None
         load_sub = summary if has_save else "No saved game found - start a new game first"
 
@@ -448,10 +562,13 @@ class App:
             r_load, "LOAD SAVED GAME", "load_game",
             selected=(self.menu_index == 0), enabled=has_save, subtitle=load_sub,
         )
+        if self.account and self.account.get("full_progress"):
+            new_sub = "Full Progress: start with Pizza Cutter, Apron & 35 HP"
+        else:
+            new_sub = "Begin a fresh shift on Floor 1"
         self.draw_button(
-            r_new, "START NEW GAME", "open_map_select",
-            selected=(self.menu_index == 1), enabled=True,
-            subtitle="Choose from 4 Martian maps and campaigns",
+            r_new, "START NEW GAME", "new_game",
+            selected=(self.menu_index == 1), enabled=True, subtitle=new_sub,
         )
         self.draw_button(
             r_back, "BACK TO MAIN MENU", "back_title",
@@ -463,77 +580,63 @@ class App:
             (SCREEN_W // 2, SCREEN_H - 30), DIM, center=True,
         )
 
-    def draw_map_select(self):
-        """Map Selection screen with 4 unlockable campaigns."""
+    def draw_text_field(self, rect, label, value, focused, action, masked=False):
+        self.text(label, (rect.x, rect.y - 24), TEXT)
+        pygame.draw.rect(self.screen, (22, 14, 24), rect, border_radius=5)
+        pygame.draw.rect(self.screen, YELLOW if focused else (110, 90, 105), rect, 2, border_radius=5)
+        shown = "*" * len(value) if masked else value
+        img = self.font_mid.render(shown, True, TEXT)
+        self.screen.blit(img, (rect.x + 12, rect.centery - img.get_height() // 2))
+        if focused and (self.frame // 30) % 2 == 0:
+            cx = rect.x + 14 + img.get_width()
+            pygame.draw.line(self.screen, YELLOW, (cx, rect.y + 10), (cx, rect.bottom - 10), 2)
+        self.buttons.append((rect, action))
+
+    def draw_auth(self):
+        """Login / Sign Up screen backed by the SQLite account database."""
         self.buttons = []
         self.draw_stars_and_mars()
-        self.text("CHOOSE YOUR MAP", (SCREEN_W // 2, 56), ORANGE, self.font_big, True, True)
-        self.text(
-            "Clear floors and defeat bosses to unlock new Martian sectors!",
-            (SCREEN_W // 2, 104), TEXT, self.font_mid, True,
-        )
+        self.text("CHEF LOGIN", (SCREEN_W // 2, 70), ORANGE, self.font_big, True, True)
+        if self.account:
+            status = f"Logged in as {self.account['username']}  -  switch account or log out below"
+        else:
+            status = "Playing as Guest  -  log in to load your progress"
+        self.text(status, (SCREEN_W // 2, 118), CYAN, self.font_mid, True)
 
-        unlocked = self.profile.get("unlocked_maps", ["ares_station"])
-        best_scores = self.profile.get("best_scores", {})
+        fw, fh = 420, 46
+        fx = SCREEN_W // 2 - fw // 2
+        r_user = pygame.Rect(fx, 180, fw, fh)
+        r_pass = pygame.Rect(fx, 262, fw, fh)
+        self.draw_text_field(r_user, "Username", self.auth_username,
+                             self.auth_focus == "username", "focus_username")
+        self.draw_text_field(r_pass, "Password", self.auth_password,
+                             self.auth_focus == "password", "focus_password", masked=True)
 
-        card_w, card_h = 510, 185
-        positions = [
-            (66, 134),
-            (SCREEN_W - 66 - card_w, 134),
-            (66, 338),
-            (SCREEN_W - 66 - card_w, 338),
-        ]
+        self.text(self.auth_message, (SCREEN_W // 2, 332), self.auth_msg_colour, center=True)
 
-        for idx, map_id in enumerate(MAP_ORDER):
-            info = MAPS[map_id]
-            is_unlocked = map_id in unlocked
-            cx, cy = positions[idx]
-            rect = pygame.Rect(cx, cy, card_w, card_h)
-            hovered = rect.collidepoint(self.mouse_pos) and is_unlocked
-            selected = (self.selected_map_idx == idx) or hovered
+        bw = 205
+        r_login = pygame.Rect(fx, 356, bw, 52)
+        r_signup = pygame.Rect(fx + fw - bw, 356, bw, 52)
+        self.draw_button(r_login, "LOG IN", "auth_login")
+        self.draw_button(r_signup, "SIGN UP", "auth_signup")
 
-            bg = (44, 24, 34) if is_unlocked else (24, 18, 28)
-            border = YELLOW if (selected and is_unlocked) else (info["accent"] if is_unlocked else (75, 68, 82))
-            pygame.draw.rect(self.screen, bg, rect, border_radius=8)
-            pygame.draw.rect(self.screen, border, rect, 2, border_radius=8)
+        r_back = pygame.Rect(fx, 424, fw, 48)
+        if self.account:
+            r_logout = pygame.Rect(fx, 424, bw, 48)
+            r_back = pygame.Rect(fx + fw - bw, 424, bw, 48)
+            self.draw_button(r_logout, "LOG OUT", "auth_logout")
+        self.draw_button(r_back, "BACK", "back_title")
 
-            # Preview floor tile + boss icon on the left side of the card
-            style = info["styles"][0]
-            tile_img = pygame.transform.scale(self.floors[style][0], (64, 64))
-            self.screen.blit(tile_img, (cx + 18, cy + 22))
-            boss_img = pygame.transform.scale(self.sprites["calzone"], (56, 56))
-            self.screen.blit(boss_img, (cx + 22, cy + 26))
-
-            stars_str = f"{info['difficulty']}/4"
-            title_col = info["accent"] if is_unlocked else DIM
-            self.text(f"{idx + 1}. {info['name']}", (cx + 98, cy + 16), title_col, self.font_mid)
-            self.text(f"{info['subtitle']}   |   Difficulty: {stars_str}", (cx + 98, cy + 46), TEXT if is_unlocked else DIM)
-
-            for l_i, line in enumerate(self.wrap(info["desc"], card_w - 114)[:2]):
-                self.text(line, (cx + 98, cy + 72 + l_i * 20), DIM)
-
-            best = best_scores.get(map_id, 0)
-            if is_unlocked:
-                status = f"UNLOCKED  -  Click to Play!   (Best Score: {best})"
-                self.text(status, (cx + 98, cy + 146), GREEN)
-                self.buttons.append((rect, f"start_map:{map_id}"))
-            else:
-                self.text(f"LOCKED  -  Unlock: {info['unlock_text']}", (cx + 98, cy + 146), RED)
-
-        # Bottom buttons: Back and Demo Unlock Toggle
-        r_back = pygame.Rect(66, 548, 240, 48)
-        r_demo = pygame.Rect(SCREEN_W - 66 - 360, 548, 360, 48)
-        self.draw_button(r_back, "BACK", "back_play")
-        all_unlocked = len(unlocked) >= len(MAP_ORDER)
-        demo_label = "LOCK EXTRA MAPS" if all_unlocked else "UNLOCK ALL MAPS (DEMO)"
-        self.draw_button(r_demo, demo_label, "toggle_unlock_all")
+        self.text("TAB switch field   ENTER log in   ESC back", (SCREEN_W // 2, 500), DIM, center=True)
+        self.text("Test account:  admin / admin  (full progress)", (SCREEN_W // 2, 526), YELLOW, center=True)
 
     def draw_settings(self):
         """Settings Menu for changing resolution and graphics quality."""
         self.buttons = []
         self.draw_stars_and_mars()
         self.text("SETTINGS", (SCREEN_W // 2, 95), ORANGE, self.font_big, True, True)
-        self.text("Customize resolution and visual effects", (SCREEN_W // 2, 150), TEXT, self.font_mid, True)
+        saved_to = f"account '{self.current_user}'" if self.current_user else "this computer (Guest)"
+        self.text(f"Settings are saved to {saved_to}", (SCREEN_W // 2, 150), TEXT, self.font_mid, True)
 
         bw, bh = 540, 66
         bx = SCREEN_W // 2 - bw // 2
@@ -817,7 +920,8 @@ class App:
         pygame.draw.line(self.screen, ORANGE, (x0, 0), (x0, SCREEN_H), 2)
         x = x0 + 14
 
-        self.text(g.map_info["name"], (x, 10), g.map_info["accent"], self.font_mid)
+        self.text("Pizza Station Ares", (x, 10), ORANGE, self.font_mid)
+        self.text(self.current_user or "Guest", (x0 + PANEL_W - 14 - self.font.size(self.current_user or "Guest")[0], 16), CYAN)
         self.text(f"Floor {g.floor}/{FINAL_FLOOR}: {FLOOR_NAMES.get(g.floor, '')}", (x, 40), TEXT)
         self.text(f"HP {max(p.hp, 0)}/{p.max_hp}", (x, 64), TEXT)
         self.bar(x + 90, 64, PANEL_W - 118, 16, p.hp, p.max_hp, GREEN)
@@ -868,7 +972,7 @@ class App:
         cx = VIEW_W // 2
         if g.state == "won":
             self.text("ORDER DELIVERED!", (cx, 175), YELLOW, self.font_big, True, True)
-            self.text(f"You conquered {g.map_info['name']}!", (cx, 235), TEXT, center=True)
+            self.text("You defeated the Giant Calzone and saved Pizza Station Ares!", (cx, 235), TEXT, center=True)
         else:
             self.text("YOUR SHIFT IS OVER", (cx, 175), RED, self.font_big, True, True)
             self.text(f"You were defeated by the {g.killer} on Floor {g.floor}.", (cx, 235), TEXT, center=True)
@@ -878,11 +982,13 @@ class App:
             (cx, 275), DIM, center=True,
         )
         self.text(f"SCORE: {g.score}", (cx, 315), ORANGE, self.font_mid, True)
-        if g.unlocked_notice:
+        if self.account:
             self.text(
-                f"NEW MAP UNLOCKED: {', '.join(g.unlocked_notice)}!",
+                f"Saved to account '{self.account['username']}'  -  Best Score: {self.account['high_score']}",
                 (cx, 355), GREEN, self.font_mid, True,
             )
+        else:
+            self.text("Playing as Guest  -  Log in from the Main Menu to keep your stats", (cx, 355), DIM, center=True)
         self.text("Press R to play again   -   M for Main Menu   -   ESC to quit", (cx, 405), TEXT, center=True)
 
     def render(self):
@@ -890,8 +996,8 @@ class App:
             self.draw_title()
         elif self.state == "play_menu":
             self.draw_play_menu()
-        elif self.state == "map_select":
-            self.draw_map_select()
+        elif self.state == "auth":
+            self.draw_auth()
         elif self.state == "settings":
             self.draw_settings()
         else:
@@ -919,10 +1025,10 @@ class App:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     if self.state == "playing" and self.game and self.game.state == "playing":
-                        save_run(self.game)
+                        save_run(self.game, self.current_user)
                     self.running = False
                 elif event.type == pygame.KEYDOWN:
-                    self.handle_key(event.key)
+                    self.handle_key(event.key, event.unicode)
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     self.handle_mouse_down(event.button, event.pos)
                 elif event.type == pygame.MOUSEBUTTONUP:

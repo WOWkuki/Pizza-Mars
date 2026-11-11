@@ -15,10 +15,11 @@ from dungeon import HATCH, DOOR_TILES, OPPOSITE_DIR          # noqa: E402
 from entities import Monster                                 # noqa: E402
 from game import (                                           # noqa: E402
     Game, save_run, load_run, get_save_summary,
-    clear_saved_run, default_profile, record_progress,
+    clear_saved_run, has_saved_run, record_run_end,
 )
+import database                                              # noqa: E402
 from items import Item                                       # noqa: E402
-from settings import CELL, DOOR_X, DOOR_Y, FINAL_FLOOR, MAP_ORDER, MAPS  # noqa: E402
+from settings import CELL, DOOR_X, DOOR_Y, FINAL_FLOOR      # noqa: E402
 from sprites import SPRITES, PALETTE                         # noqa: E402
 
 
@@ -212,39 +213,105 @@ class TestDungeon(unittest.TestCase):
             self.assertGreater(len(room.wall_decor), 0)
             self.assertGreater(len(room.floor_decor), 0)
 
-    def test_all_four_maps_generate_and_unlock(self):
-        prof = default_profile()
-        self.assertEqual(prof["unlocked_maps"], ["ares_station"])
-        for map_id in MAP_ORDER:
-            g = Game(seed=10, map_id=map_id)
-            self.assertEqual(g.map_id, map_id)
-            allowed_styles = set(MAPS[map_id]["styles"] + ["storage", MAPS[map_id]["boss_style"]])
-            for rm in g.dungeon.rooms.values():
-                self.assertIn(rm.style, allowed_styles)
-            g.state = "won"
-            record_progress(g, prof, path="/tmp/test_cheese_profile.json")
-        self.assertEqual(set(prof["unlocked_maps"]), set(MAP_ORDER))
-
     def test_save_and_load_game(self):
         tmp_save = "/tmp/test_cheese_save.json"
-        clear_saved_run(tmp_save)
-        g = Game(seed=42, map_id="cryo_vaults")
+        clear_saved_run(path=tmp_save)
+        g = Game(seed=42)
         g.descend()
         g.player.hp = 19
         g.player.weapon = "cutter"
         g.player.credits = 33
         self.assertTrue(save_run(g, path=tmp_save))
         summary = get_save_summary(path=tmp_save)
-        self.assertIn("Polar Cryo-Vaults", summary)
+        self.assertIn("Floor 2", summary)
         loaded = load_run(path=tmp_save)
         self.assertIsNotNone(loaded)
-        self.assertEqual(loaded.map_id, "cryo_vaults")
         self.assertEqual(loaded.floor, 2)
         self.assertEqual(loaded.player.hp, 19)
         self.assertEqual(loaded.player.weapon, "cutter")
         self.assertEqual(loaded.player.credits, 33)
-        clear_saved_run(tmp_save)
+        clear_saved_run(path=tmp_save)
 
+    def test_full_progress_start_gear(self):
+        g = Game(seed=5, full_progress=True)
+        self.assertEqual(g.player.weapon, "cutter")
+        self.assertEqual(g.player.armor, "apron")
+        self.assertEqual(g.player.max_hp, 35)
+        self.assertEqual(g.player.hp, 35)
+        normal = Game(seed=5)
+        self.assertIsNone(normal.player.weapon)
+
+
+class TestAccounts(unittest.TestCase):
+    DB = "/tmp/test_cheese_accounts.db"
+
+    def setUp(self):
+        if os.path.exists(self.DB):
+            os.remove(self.DB)
+        database.init_db(self.DB)
+
+    def tearDown(self):
+        if os.path.exists(self.DB):
+            os.remove(self.DB)
+
+    def test_admin_account_has_full_progress(self):
+        ok, _, acc = database.login_user("admin", "admin", db_path=self.DB)
+        self.assertTrue(ok)
+        self.assertTrue(acc["full_progress"])
+        self.assertEqual(acc["high_score"], 9999)
+        self.assertEqual(acc["highest_floor"], 5)
+        self.assertIsNotNone(acc["saved_run"])
+        loaded = load_run("admin", db_path=self.DB)
+        self.assertEqual(loaded.floor, 5)
+        self.assertEqual(loaded.player.weapon, "cutter")
+        self.assertEqual(loaded.player.armor, "apron")
+        self.assertIn("Floor 5", get_save_summary("admin", db_path=self.DB))
+
+    def test_wrong_password_and_duplicates_rejected(self):
+        ok, _, acc = database.login_user("admin", "wrong", db_path=self.DB)
+        self.assertFalse(ok)
+        self.assertIsNone(acc)
+        ok, _, _ = database.signup_user("Admin", "xyz", db_path=self.DB)
+        self.assertFalse(ok)
+        ok, _, _ = database.signup_user("a", "xyz", db_path=self.DB)
+        self.assertFalse(ok)
+        ok, _, _ = database.login_user("nobody", "pw", db_path=self.DB)
+        self.assertFalse(ok)
+
+    def test_signup_save_and_load_progress(self):
+        ok, _, acc = database.signup_user("marschef", "pepperoni", db_path=self.DB)
+        self.assertTrue(ok)
+        self.assertFalse(acc["full_progress"])
+        self.assertIsNone(acc["saved_run"])
+        self.assertFalse(has_saved_run("marschef", db_path=self.DB))
+
+        g = Game(seed=11)
+        g.descend()
+        g.player.credits = 77
+        self.assertTrue(save_run(g, "marschef", db_path=self.DB))
+        ok, _, acc = database.login_user("marschef", "pepperoni", db_path=self.DB)
+        self.assertTrue(ok)
+        self.assertEqual(acc["highest_floor"], 2)
+        loaded = load_run("marschef", db_path=self.DB)
+        self.assertEqual(loaded.floor, 2)
+        self.assertEqual(loaded.player.credits, 77)
+
+        # Winning a run records stats, unlocks full progress, and clears the save
+        g.state = "won"
+        g.player.kills = 12
+        record_run_end(g, "marschef", db_path=self.DB)
+        acc = database.get_account("marschef", db_path=self.DB)
+        self.assertEqual(acc["games_won"], 1)
+        self.assertEqual(acc["total_kills"], 12)
+        self.assertTrue(acc["full_progress"])
+        self.assertIsNone(acc["saved_run"])
+
+        database.update_account_settings("marschef", {"resolution_index": 1, "graphics_quality": "Low"}, db_path=self.DB)
+        acc = database.get_account("marschef", db_path=self.DB)
+        self.assertEqual(acc["settings"]["graphics_quality"], "Low")
+
+
+class TestLoot(unittest.TestCase):
     def test_rolling_pin_on_floor_one(self):
         for seed in range(30):
             g = Game(seed)

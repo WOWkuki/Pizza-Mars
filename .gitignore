@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 profile.json
 savegame.json
+accounts.db
+*.bak_test

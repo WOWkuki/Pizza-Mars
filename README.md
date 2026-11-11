@@ -30,17 +30,18 @@ python3 -m venv .venv
 | **R / Enter** | Restart after a run ends |
 | **ESC** | Save & Quit |
 
-## Starter Menu, Save/Load & 4 Unlockable Maps
+## Starter Menu, Accounts & Save/Load
 
 - **Starter Menu**: Choose **Play**, **Settings**, or **Quit** with the mouse or keyboard.
+- **Login / Sign Up** (button in the **bottom-right** of the Starter Menu, or press **L**):
+  - **Sign Up** creates a new account in the SQLite database `accounts.db` (passwords are stored hashed).
+  - **Log In** loads that account's saved run, best score, highest floor, and settings.
+  - **Test account: `admin` / `admin`** has full progress: best score 9999, a ready-to-load Floor 5 save,
+    and every new game starts with the Pizza Cutter, Heat-Shield Apron and 35 HP.
+  - Beating the Giant Calzone once unlocks the same "full progress" start gear on your own account.
+  - Without logging in you play as **Guest** (saved to `savegame.json` on this computer).
 - **Play Menu**: Choose **Load Saved Game** (continues your auto-saved or F5-saved run) or **Start New Game**.
-- **Settings Menu**: Change the **Window Resolution** (`1010x520`, `1212x624`, `1454x748`, `1696x874`) and **Graphics Quality** (`Low`, `Medium`, `High`).
-- **4 Unlockable Maps**:
-  1. **Pizza Station Ares** (Unlocked at start) - Boss: *Giant Calzone*
-  2. **Polar Cryo-Vaults** (Unlock: Reach Floor 3 or beat Map 1) - Boss: *Frostbite Calzone*
-  3. **Olympus Lava Ovens** (Unlock: Beat Polar Cryo-Vaults) - Boss: *Volcanic Calzone*
-  4. **Anchovy Mothership** (Unlock: Beat Olympus Lava Ovens) - Boss: *Emperor Calzone Rex*
-  *(Tip: On the Map Select screen, you can also click **Unlock All Maps (Demo)** to test any map right away!)*
+- **Settings Menu**: Change the **Window Resolution** and **Graphics Quality** (`Low`, `Medium`, `High`). Saved per account.
 
 ## How the game works
 
@@ -70,7 +71,8 @@ python3 -m venv .venv
 | File | What's inside |
 |---|---|
 | `main.py` | 60 FPS window, room & minimap drawing, keyboard + mouse input |
-| `game.py` | Real-time game rules: movement, shooting, room locking, monster AI |
+| `game.py` | Real-time game rules: movement, shooting, room locking, monster AI, save/load |
+| `database.py` | SQLite account database: sign up, log in, saved runs, stats, admin account |
 | `dungeon.py` | Isaac-style connected room generator, doors, obstacles |
 | `entities.py` | Player, Monster, and Projectile classes |
 | `items.py` | Item definitions |
