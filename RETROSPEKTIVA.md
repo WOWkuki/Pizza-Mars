@@ -1,7 +1,9 @@
 # Retrospektiva
 
-**Jméno:** Lukáš Kráčmar  
+**Jméno:** Lukáš Kráčmar (týmový projekt s Lindou Matuškovou)  
 **Projekt:** Pizza Station Ares  
+
+Na projektu jsme pracovali ve dvou - já jsem řešil hlavně samotné programování hry a Linda Matušková vzala kompletní dokumentaci (README, design dokument, testovací scénář a kontrolu zadání), což nám hodně ušetřilo čas před odevzdáním.
 
 ## Co bych příště udělal jinak
 

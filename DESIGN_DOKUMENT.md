@@ -1,6 +1,6 @@
 # Design dokument - Pizza Station Ares
 
-**Autor:** Lukáš Kráčmar  
+**Autoři:** Lukáš Kráčmar (vývoj hry), Linda Matušková (dokumentace)  
 **Žánr:** 2D akční roguelike (top-down shooter)  
 **Téma:** Pizzerie na Marsu  
 
@@ -57,7 +57,7 @@ Pokud hráč sebere zbraň nebo zbroj, kterou už má (nebo slabší), automatic
 
 ## 6. Systém účtů a technické rozdělení
 
-Aby mělo smysl hru hrát opakovaně a šel snadno testovat konec hry, přidal jsem přihlašovací systém napojený na lokální **SQLite databázi** (`accounts.db`):
+Aby mělo smysl hru hrát opakovaně a šel snadno testovat konec hry, přidali jsme přihlašovací systém napojený na lokální **SQLite databázi** (`accounts.db`):
 - Hráč si může zaregistrovat vlastní účet (heslo se ukládá jako SHA-256 hash). Ke každému účtu se ukládá nejvyšší skóre, nejvyšší patro, počet výher, nastavení a aktuálně rozehraná hra.
 - Pro testování je v databázi předpřipravený účet `admin` / `admin`, který má plný postup a uloženou pozici v 5. patře.
 

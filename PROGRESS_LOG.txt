@@ -232,3 +232,9 @@ IDEAS FOR NEXT STEPS (not done yet)
     * Prepared an oral-defense study guide artifact outside the Git repo.
 - Verified no hardcoded paths exist, compiled all Python files, and ran full test suite (18/18 tests).
 - Committed documentation deliverables to Git.
+
+[2026-11-24 12:03] Session 7 (cont.) - ADDED CO-AUTHOR LINDA MATUSKOVA
+- Updated README.md, DESIGN_DOKUMENT.md, and RETROSPEKTIVA.md to credit Linda Matušková
+  for all project documentation (README, Design Document, manual test scenario, deliverable checks)
+  alongside Lukáš Kráčmar (game programming).
+- Committed update to Git.

@@ -2,6 +2,11 @@
 
 2D akční roguelike hra z pohledu shora inspirovaná hrou *The Binding of Isaac*. Hra je zasazená do pizzerie na Marsu a běží v reálném čase (60 FPS).
 
+## Autoři a rozdělení práce
+
+- **Lukáš Kráčmar** - programování hry, herní logika, generování místností, databáze účtů, automatické testy
+- **Linda Matušková** - kompletní dokumentace projektu (`README.md`, `DESIGN_DOKUMENT.md`, ruční testovací scénář, kontrola odevzdání)
+
 ## Popis hry
 
 Píše se rok 2097 a pracuješ jako kuchař na vesmírné pizzerii na Marsu. V kuchyni se ale něco pokazilo - suroviny zmutovaly, rozvážkové drony se zbláznily a základnu obsadily vesmírné ančovičky.
