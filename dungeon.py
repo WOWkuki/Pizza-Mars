@@ -355,3 +355,4 @@ class Dungeon:
         # Add furniture & decorations to all rooms
         for room in self.rooms.values():
             room.add_obstacles(self.rng)
+

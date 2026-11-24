@@ -217,3 +217,18 @@ IDEAS FOR NEXT STEPS (not done yet)
     * Check 3 (Real main loop): clicked the bottom-right Login button, typed admin / TAB / admin /
       ENTER, PLAY -> LOAD, shot, F5, M, quit -> OK, loaded on Floor 5 with the Pizza Cutter.
 - README.md updated. Committed to Git.
+
+[2026-11-24 11:45-11:52] Session 7 - SCHOOL ASSIGNMENT DELIVERABLES (CZECH DOCS & CHECKS)
+- Checked PROGRESS_LOG.txt first as required.
+- Audited project against the school assignment ("Definice hotovo" + "Povinné výstupy"):
+    * Rewrote README.md in natural Czech with all required sections: game description, used
+      technologies, step-by-step launch instructions for a foreign PC (both Windows and Linux/macOS),
+      controls, account/admin info, automated test command, and manual testing scenario.
+    * Created DESIGN_DOKUMENT.md (concept, core loop, enemies/boss, items, pixel-art & UI, architecture).
+    * Created DENIK_SELHANI_AI.md with 4 concrete real cases from development (turn-based/dark FOV +
+      initial difficulty, Hyprland resolution scaling ValueError crash, 4 copy-paste maps replaced by
+      SQLite login system, chef blinking without weapon on room entry).
+    * Created RETROSPEKTIVA.md (what to do differently, where AI helped, where AI got in the way).
+    * Prepared an oral-defense study guide artifact outside the Git repo.
+- Verified no hardcoded paths exist, compiled all Python files, and ran full test suite (18/18 tests).
+- Committed documentation deliverables to Git.
